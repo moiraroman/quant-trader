@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyc
+.env
+.venv/
+venv/
+ENV/
+
+# Data & output
+data_cache/
+output/
+logs/*.log
+*.parquet
+*.sqlite
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Test / temp files
+test_output*.txt
+test_regression.py
+test_report.txt
+task-summary*.md
+
+# Node (frontend)
+frontend/node_modules/
+frontend/.next/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/

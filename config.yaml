@@ -1,0 +1,190 @@
+# ============================================================
+# quant_trader 全局配置文件
+# ============================================================
+
+# -------- 数据源 --------
+data:
+  # yfinance 默认参数
+  yf:
+    default_ticker: "AAPL"
+    default_period: "2y"          # 默认拉取历史周期
+    default_interval: "1d"         # 默认K线周期
+    cache_dir: "data_cache/"        # 本地缓存目录
+    cache_expire_hours: 24          # 缓存过期小时数
+    auto_update: false              # 自动更新数据
+    update_interval_minutes: 30     # 更新间隔（分钟）
+
+  # MOOMOO OpenAPI（模拟/实盘共用）
+  moomoo:
+    enable: false                   # 暂未启用，设置 true 后填写下方
+    api_key: ""                     # 从 MOOMOO OpenAPI 平台获取
+    app_secret: ""                  # 同上
+    paper_trade: true              # True=模拟盘 False=实盘
+    srv_proxy_addr: ""             # 代理地址，留空则直连（如需翻墙）
+    log_level: "INFO"
+    host: "127.0.0.1"              # OpenD 服务地址
+    port: 11111                     # OpenD 服务端口
+    timeout_seconds: 30            # API 超时时间
+    trade_pwd: ""                  # 交易密码（实盘必填）
+
+# -------- 策略参数 --------
+strategy:
+  default:
+    symbol: "AAPL"                  # 默认交易标的
+    initial_cash: 100000.0         # 初始资金（USD）
+    commission: 0.001              # 手续费率 0.1%（单边）
+    slippage: 0.0005                # 滑点 0.05%
+
+  # AI 信号权重（可多策略加权合并）
+  ai:
+    model_type: "lightgbm"         # lightgbm | random_forest | lstm
+    feature_window: 60             # 特征窗口天数
+    prediction_horizon: 5           # 预测未来 N 天涨跌
+    signal_threshold: 0.6           # 信号置信度阈值
+
+  # 技术指标参数
+  technical:
+    sma_short: 10
+    sma_long: 50
+    rsi_period: 14
+    rsi_oversold: 30
+    rsi_overbought: 70
+    bb_period: 20
+    bb_std: 2
+
+# -------- 风控 --------
+risk:
+  max_position_pct: 0.2            # 单品种最大仓位 20%
+  max_total_position_pct: 0.8      # 总仓位不超过 80%
+  max_loss_per_trade_pct: 0.05     # 单笔最大亏损 5%
+  
+  # ATR 动态止盈止损
+  stop_loss_atr_mult: 2.0          # 止损 ATR 倍数
+  take_profit_atr_mult: 8.0        # 止盈 ATR 倍数
+  
+  # 硬止损/硬止盈（固定百分比）
+  hard_stop_loss_pct: 0.05         # 硬止损 5%
+  hard_take_profit_pct: 0.20       # 硬止盈 20%
+  enable_hard_stop: true           # 是否启用硬止损
+  enable_hard_take_profit: true    # 是否启用硬止盈
+  
+  # 其他风控
+  daily_loss_stop_pct: 0.10        # 日亏损熔断 10%
+  max_consecutive_losses: 5        # 最大连续亏损次数
+  rsi_take_profit_threshold: 70    # RSI 自动止盈阈值
+
+# -------- 选股因子配置 --------
+screening:
+  # 6因子评分模型权重（总和应为1.0）
+  factor_weights:
+    momentum: 0.25      # 动量因子（近期涨幅）
+    trend: 0.20         # 趋势因子（均线排列）
+    volume: 0.15        # 成交量因子（放量）
+    volatility: 0.15    # 波动因子（低波动偏好）
+    rsi: 0.15           # RSI因子
+    ma_deviation: 0.10  # MA偏离因子
+  
+  # 信号判断阈值
+  thresholds:
+    rsi_oversold: 35        # RSI超卖阈值（BUY信号）
+    rsi_overbought: 70      # RSI超买阈值（SELL信号）
+    trend_bull: 0.6          # 趋势向上阈值
+    trend_bear: 0.4          # 趋势向下阈值
+    momentum_strong: 0.7     # 强劲动量阈值
+    momentum_weak: 0.3       # 弱势动量阈值
+    min_score_buy: 70        # BUY信号最低得分
+    max_score_sell: 40       # SELL信号最高得分
+  
+  # 计算参数
+  params:
+    momentum_short_period: 5    # 短期动量周期
+    momentum_long_period: 20    # 长期动量周期
+    volume_avg_period: 20       # 成交量均线周期
+    rsi_period: 14              # RSI周期
+    atr_period: 14              # ATR周期
+    ma_short_period: 20         # 短期均线周期
+    ma_long_period: 50          # 长期均线周期
+
+# -------- 回测 --------
+backtest:
+  start_date: "2023-01-01"
+  end_date: "2024-12-31"
+  benchmark: "SPY"                 # 对比基准
+  output_dir: "output/"            # 回测报告输出目录
+
+# -------- 日志 --------
+logging:
+  level: "INFO"
+  file: "logs/quant_trader.log"
+  console: true
+  max_bytes: 10485760              # 10MB 轮转
+  backup_count: 5
+
+# -------- 通知推送 --------
+notification:
+  enable: false                     # 是否启用通知
+  
+  # 邮件通知
+  email:
+    enable: false
+    smtp_host: ""                  # SMTP 服务器地址
+    smtp_port: 587                 # SMTP 端口
+    smtp_user: ""                  # SMTP 用户名（邮箱地址）
+    smtp_password: ""              # SMTP 密码/授权码
+    from_addr: ""                  # 发件人地址
+    to_addrs: []                   # 收件人地址列表
+    
+  # Telegram 通知
+  telegram:
+    enable: false
+    bot_token: ""                  # Bot Token
+    chat_id: ""                    # Chat ID
+    
+  # 企业微信通知
+  wechat:
+    enable: false
+    webhook_url: ""                # 企业微信机器人 Webhook URL
+
+  # 通知触发条件
+  triggers:
+    on_trade: true                 # 交易发生时通知
+    on_signal: true                # 信号产生时通知
+    on_error: true                 # 错误发生时通知
+    on_daily_report: true          # 每日报告
+    on_risk_alert: true            # 风险预警
+
+# -------- AI 接口 --------
+ai:
+  # 大语言模型（用于分析报告生成）
+  llm:
+    enable: false
+    provider: "openai"             # openai | anthropic | deepseek | local
+    api_key: ""
+    api_base: ""                   # 自定义 API 端点
+    model: "gpt-4o-mini"           # 模型名称
+    temperature: 0.7
+    max_tokens: 2000
+    
+  # AI 分析设置
+  analysis:
+    daily_report_time: "18:00"     # 每日报告生成时间
+    weekly_report_day: "friday"    # 每周报告日
+    market_analysis: true          # 市场分析
+    stock_screening: true          # 选股筛选
+    strategy_recommendation: true  # 策略推荐
+    
+# -------- 参数优化 --------
+optimization:
+  enable: false
+  method: "grid"                   # grid | random | bayesian
+  n_trials: 100                    # 随机搜索/贝叶斯优化试验次数
+  cv_folds: 5                      # 交叉验证折数
+  scoring: "sharpe"                # 优化目标: sharpe | return | max_drawdown
+  output_dir: "optimization/"
+  
+# -------- 定时任务 --------
+scheduler:
+  enable: false
+  data_update_cron: "0 */30 9-16 * * 1-5"   # 交易时间每30分钟更新数据
+  daily_analysis_cron: "0 18 * * 1-5"        # 每交易日18:00分析
+  weekly_report_cron: "0 18 * * 5"           # 每周五18:00周报
