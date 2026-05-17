@@ -1,0 +1,104 @@
+{
+  "updated_at": "2026-04-25T03:21:10.384681",
+  "instances": [
+    {
+      "instance_id": "MA_Cross_AAPL_032110",
+      "strategy_name": "MA_Cross",
+      "ticker": "AAPL",
+      "is_active": true,
+      "weight": 0.3333333333333333,
+      "tags": [
+        "default"
+      ],
+      "notes": "",
+      "parameters": {
+        "fast_period": {
+          "value": 10,
+          "default_value": 10,
+          "min_value": 5,
+          "max_value": 50,
+          "step": null,
+          "description": "快线周期",
+          "param_type": "int",
+          "choices": []
+        },
+        "slow_period": {
+          "value": 30,
+          "default_value": 30,
+          "min_value": 20,
+          "max_value": 200,
+          "step": null,
+          "description": "慢线周期",
+          "param_type": "int",
+          "choices": []
+        }
+      }
+    },
+    {
+      "instance_id": "MA_Cross_MSFT_032110",
+      "strategy_name": "MA_Cross",
+      "ticker": "MSFT",
+      "is_active": true,
+      "weight": 0.3333333333333333,
+      "tags": [
+        "default"
+      ],
+      "notes": "",
+      "parameters": {
+        "fast_period": {
+          "value": 10,
+          "default_value": 10,
+          "min_value": 5,
+          "max_value": 50,
+          "step": null,
+          "description": "快线周期",
+          "param_type": "int",
+          "choices": []
+        },
+        "slow_period": {
+          "value": 30,
+          "default_value": 30,
+          "min_value": 20,
+          "max_value": 200,
+          "step": null,
+          "description": "慢线周期",
+          "param_type": "int",
+          "choices": []
+        }
+      }
+    },
+    {
+      "instance_id": "MA_Cross_GOOGL_032110",
+      "strategy_name": "MA_Cross",
+      "ticker": "GOOGL",
+      "is_active": true,
+      "weight": 0.3333333333333333,
+      "tags": [
+        "default"
+      ],
+      "notes": "",
+      "parameters": {
+        "fast_period": {
+          "value": 10,
+          "default_value": 10,
+          "min_value": 5,
+          "max_value": 50,
+          "step": null,
+          "description": "快线周期",
+          "param_type": "int",
+          "choices": []
+        },
+        "slow_period": {
+          "value": 30,
+          "default_value": 30,
+          "min_value": 20,
+          "max_value": 200,
+          "step": null,
+          "description": "慢线周期",
+          "param_type": "int",
+          "choices": []
+        }
+      }
+    }
+  ]
+}

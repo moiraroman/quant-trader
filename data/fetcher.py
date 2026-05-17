@@ -1,7 +1,49 @@
 # ============================================================
 # data/fetcher.py — 市场数据获取模块
-# 支持：yfinance（免费美股数据）+ MOOMOO OpenAPI（行情/交易）
+# 多数据源架构：yfinance(主) → Stooq(备) → AlphaVantage/FMP(备)
 # ============================================================
+#
+# 使用方式：
+#   from data.fetcher import YFinanceFetcher, MultiSourceFetcher
+#   fetcher = MultiSourceFetcher()  # 推荐：自动降级
+#   # 或
+#   fetcher = YFinanceFetcher()     # 仅用 yfinance
+#
+# 数据源优先级（MultiSourceFetcher）：
+#   1. yfinance（主源，免费无限制）
+#   2. Stooq（备用，免费无限制，仅日线+）
+#   3. Alpha Vantage（备用，25次/天，支持分钟级）
+#   4. FMP（备用，250次/天，财务数据丰富）
+#
+# ============================================================
+
+# 导出主要类（保持向后兼容）
+from .fetcher_base import BaseDataFetcher, Quote, DataSourceStatus
+from .fetcher_yfinance import YFinanceFetcher
+from .fetcher_stooq import StooqFetcher
+from .fetcher_multi import MultiSourceFetcher
+
+# 兼容旧代码：YFinanceFetcher 直接导出
+# 但推荐使用 MultiSourceFetcher 获得自动降级能力
+
+__all__ = [
+    "YFinanceFetcher",
+    "MultiSourceFetcher",
+    "StooqFetcher",
+    "BaseDataFetcher",
+    "Quote",
+    "DataSourceStatus",
+]
+
+
+# ============================================================
+# 旧版 YFinanceFetcher 代码（保留但标记废弃）
+# 新代码应使用 fetcher_yfinance.py 中的实现
+# ============================================================
+
+# 下方的旧实现已迁移到 fetcher_yfinance.py
+# 保留此类定义仅用于向后兼容检查
+
 import os
 import time
 import logging
@@ -13,9 +55,6 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# ============================================================
-# 工具函数
-# ============================================================
 
 def _parse_period(period: str) -> tuple[str, str]:
     """把 period 转为 start/end 日期字符串"""
@@ -31,11 +70,8 @@ def _parse_period(period: str) -> tuple[str, str]:
     return mapping.get(period, ("2y", "now"))
 
 
-# ============================================================
-# YFinance 数据获取器
-# ============================================================
-
-class YFinanceFetcher:
+# 旧版类定义（向后兼容，实际使用上方导入的新实现）
+class _YFinanceFetcherLegacy:
     """
     通过 yfinance 拉取美股历史行情、财务数据、实时报价。
     全部免费，无需 API Key。

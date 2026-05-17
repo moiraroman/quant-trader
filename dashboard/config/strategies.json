@@ -1,0 +1,36 @@
+{
+  "updated_at": "2026-04-25T03:17:40.143790",
+  "instances": [
+    {
+      "instance_id": "MA_Cross_AAPL_031740",
+      "strategy_name": "MA_Cross",
+      "ticker": "AAPL",
+      "is_active": true,
+      "weight": 1.0,
+      "tags": [],
+      "notes": "",
+      "parameters": {
+        "fast_period": {
+          "value": 10,
+          "default_value": 10,
+          "min_value": 5,
+          "max_value": 50,
+          "step": null,
+          "description": "快线周期",
+          "param_type": "int",
+          "choices": []
+        },
+        "slow_period": {
+          "value": 30,
+          "default_value": 30,
+          "min_value": 20,
+          "max_value": 200,
+          "step": null,
+          "description": "慢线周期",
+          "param_type": "int",
+          "choices": []
+        }
+      }
+    }
+  ]
+}

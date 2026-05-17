@@ -1,0 +1,40 @@
+=== Issue 1: report.market_state analysis key ===
+market_state type: <class 'dict'>
+Has analysis key: True
+analysis value: 当前市场状态：上升趋势
+波动率：低波动
+动量：强势
+风险等级：2/10
+
+推荐策略：MACD, RS...
+
+=== Issue 2: report attributes ===
+Has top_opportunities: True
+top_opportunities type: <class 'list'>
+opp type: <class 'dict'>
+opp keys: ['ticker', 'score', 'signal', 'price', 'reason']
+Has strategy_recommendations: True
+rec type: <class 'dict'>
+rec keys: ['ticker', 'strategies', 'reason']
+Has risk_alerts: True
+Has ai_summary: True
+ai_summary: 
+
+=== Issue 3: Backtest engine ===
+Data shape: (63, 5)
+Signals columns: ['signal', 'strength', 'confidence', 'reason']
+Result keys: ['equity_curve', 'trades', 'metrics', 'initial_cash', 'final_equity']
+Has equity_curve: True
+Has trades: True
+
+=== Issue 4: Optimizer ===
+Optimize result type: <class 'optimization.optimizer.OptimizationResult'>
+Has best_params: True
+best_score: 2.945274814955274
+
+=== Issue 5: Settings config ===
+Config keys: ['ai', 'backtest', 'data', 'logging', 'notification', 'optimization', 'risk', 'scheduler', 'screening', 'strategy']
+backtest: {'benchmark': 'SPY', 'end_date': '2024-12-31', 'initial_capital': 100000, 'output_dir': 'output/', 'start_date': '2023-01-01'}
+risk: {'daily_loss_stop_pct': 0.1, 'enable_hard_stop': True, 'enable_hard_take_profit': True, 'hard_stop_loss_pct': 0.05, 'hard_take_profit_pct': 0.2, 'max_consecutive_losses': 5, 'max_loss_per_trade_pct': 0.05, 'max_position_pct': 0.2, 'max_total_position_pct': 0.8, 'rsi_take_profit_threshold': 70, 'stop_loss_atr_mult': 2.0, 'take_profit_atr_mult': 8.0}
+
+=== ALL CHECKS COMPLETED ===

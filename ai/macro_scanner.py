@@ -127,19 +127,40 @@ class CreditAnalysis:
 
 @dataclass
 class BreadthAnalysis:
-    """市场广度分析结果"""
+    """市场广度分析结果 v2 - 增强版（含标准差阶段、趋势质量）"""
     rsp_vs_spy_diff: float
     rsp_ret_20d: float
     spy_ret_20d: float
-    breadth_signal: str  # healthy / weak / neutral
+    breadth_signal: str  # healthy / weak / neutral / cap_driven
     breadth_score: float
+    # 新增：标准差/波动阶段
+    std_phase: str = "unknown"  # contraction / expansion_early / expansion_extreme
+    bb_width: float = 0.0
+    atr_pct: float = 0.0
+    zscore: float = 0.0
+    # 新增：趋势质量评分
+    trend_quality: str = "unknown"  # 5star / 2star / 1star / warning
+    trend_quality_score: int = 0  # 1-5
+    # 新增：A/D 与 NH/NL 近似指标
+    ad_ratio_approx: Optional[float] = None  # 近似 A/D 比
+    nh_nl_signal: str = "unknown"  # strong / weak / diverging
+    # 分析步骤
     analysis_steps: List[AnalysisStep] = field(default_factory=list)
     raw_data: Dict = field(default_factory=dict)
 
 
 @dataclass
+class ModuleBias:
+    """单个模块的多空倾向"""
+    name: str
+    bias: str  # 多 / 空 / 中性
+    strength: float  # 0.0-1.0 倾向强度
+    detail: str = ""  # 简要说明
+
+
+@dataclass
 class MacroEnvironment:
-    """宏观市场环境"""
+    """宏观市场环境 v2 - 增强版"""
     regime: str  # Risk-On / Neutral / Risk-Off
     macro_env_score: int  # 1-10
     confidence: str  # high / medium / low
@@ -159,6 +180,14 @@ class MacroEnvironment:
     summary: str = ""
     module_scores: Dict[str, float] = field(default_factory=dict)
     module_scores_norm: Dict[str, float] = field(default_factory=dict)
+    # 新增：各模块多空倾向
+    module_bias: List[ModuleBias] = field(default_factory=list)
+    # 新增：未来倾向预测
+    forecast_5d: str = "中性"  # 多 / 空 / 中性
+    forecast_30d: str = "中性"
+    forecast_confidence_5d: float = 0.0
+    forecast_confidence_30d: float = 0.0
+    forecast_reason: str = ""
 
 
 @dataclass
@@ -282,12 +311,23 @@ class MacroScanner:
         key_drivers = self._extract_key_drivers(module_scores_norm, regime)
         warnings = self._extract_warnings(module_scores, regime, vix_value)
 
-        # Step 9: 生成摘要
-        summary = self._generate_summary(
-            regime, macro_env_score, confidence, key_drivers, warnings
+        # Step 9: 各模块多空倾向
+        module_bias = self._calculate_module_bias(
+            index_results, haven_results, credit_result, breadth_result, vix_value, module_scores_norm
         )
 
-        # Step 10: 构建环境对象
+        # Step 10: 未来5天/30天倾向预测
+        forecast_5d, forecast_30d, fc_conf_5d, fc_conf_30d, fc_reason = self._forecast_outlook(
+            regime, macro_env_score, module_scores_norm, module_bias, vix_value, breadth_result
+        )
+
+        # Step 11: 生成摘要
+        summary = self._generate_summary(
+            regime, macro_env_score, confidence, key_drivers, warnings,
+            module_bias, forecast_5d, forecast_30d
+        )
+
+        # Step 12: 构建环境对象
         bull_count = sum(1 for r in index_results if r.trend == "bull")
         bear_count = sum(1 for r in index_results if r.trend == "bear")
 
@@ -311,6 +351,12 @@ class MacroScanner:
             summary=summary,
             module_scores=module_scores,
             module_scores_norm=module_scores_norm,
+            module_bias=module_bias,
+            forecast_5d=forecast_5d,
+            forecast_30d=forecast_30d,
+            forecast_confidence_5d=fc_conf_5d,
+            forecast_confidence_30d=fc_conf_30d,
+            forecast_reason=fc_reason,
         )
 
         # Step 11: 构建最终结果
@@ -679,7 +725,7 @@ class MacroScanner:
         )
 
     def _analyze_breadth(self) -> Optional[BreadthAnalysis]:
-        """分析市场广度"""
+        """分析市场广度 v2 - 增强版（含标准差阶段 + 趋势质量）"""
         steps = []
         rsp_df = self._get_df("RSP")
         spy_df = self._get_df("SPY")
@@ -695,26 +741,111 @@ class MacroScanner:
         spy_ret_20d = spy_features.get("ret_20d", 0)
         rsp_vs_spy_diff = rsp_ret_20d - spy_ret_20d
 
-        # 广度信号
-        if rsp_vs_spy_diff > 1.0:
+        # ===== 1. 标准差/波动阶段分析 =====
+        close = spy_df["Close"]
+        # Bollinger Band 宽度
+        ma20 = close.rolling(20).mean()
+        std20 = close.rolling(20).std()
+        bb_upper = ma20 + 2 * std20
+        bb_lower = ma20 - 2 * std20
+        bb_width = ((bb_upper.iloc[-1] - bb_lower.iloc[-1]) / ma20.iloc[-1] * 100) if ma20.iloc[-1] > 0 else 0
+
+        # ATR%
+        high = spy_df["High"]
+        low = spy_df["Low"]
+        tr = pd.concat([high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
+        atr = tr.rolling(14).mean()
+        atr_pct = (atr.iloc[-1] / close.iloc[-1] * 100) if close.iloc[-1] > 0 else 0
+
+        # Z-score
+        zscore = rsp_features.get("zscore_20", 0)
+
+        # 标准差阶段判断
+        # 历史 BB 宽度参考
+        hist_bb_width = ((bb_upper - bb_lower) / ma20 * 100).dropna()
+        bb_pctile = (hist_bb_width < bb_width).mean() * 100 if len(hist_bb_width) > 0 else 50
+
+        if bb_pctile < 20:
+            std_phase = "contraction"  # 收缩
+            std_reason = "Bollinger收窄，市场蓄力"
+        elif bb_pctile < 70:
+            std_phase = "expansion_early"  # 扩张初期
+            std_reason = "波动刚扩张，趋势确认中"
+        else:
+            std_phase = "expansion_extreme"  # 极端扩张
+            std_reason = "波动极端，警惕回归均值"
+
+        # ===== 2. A/D 近似（用涨跌天数比）=====
+        spy_daily_ret = spy_df["Close"].pct_change().dropna() * 100
+        up_days = (spy_daily_ret > 0).sum()
+        down_days = (spy_daily_ret < 0).sum()
+        ad_ratio_approx = up_days / max(down_days, 1)
+
+        # ===== 3. NH/NL 近似信号（用创新高/新低天数）=====
+        rolling_high = spy_df["Close"].rolling(20).max()
+        rolling_low = spy_df["Close"].rolling(20).min()
+        is_nh = spy_df["Close"] >= rolling_high
+        is_nl = spy_df["Close"] <= rolling_low
+        nh_count = is_nh.sum()
+        nl_count = is_nl.sum()
+
+        if nh_count > nl_count * 2 and rsp_vs_spy_diff > 0:
+            nh_nl_signal = "strong"
+            nh_nl_reason = "新高远多于新低，趋势强劲"
+        elif nl_count > nh_count and rsp_vs_spy_diff < -1:
+            nh_nl_signal = "weak"
+            nh_nl_reason = "新低增多，趋势转弱"
+        elif nh_count > 0 and nl_count > 0 and rsp_vs_spy_diff < -0.5:
+            nh_nl_signal = "diverging"
+            nh_nl_reason = "指数强但广度弱，顶背离风险"
+        else:
+            nh_nl_signal = "neutral"
+            nh_nl_reason = "新高新低均衡"
+
+        # ===== 4. 广度信号（四种状态）=====
+        if rsp_vs_spy_diff > 1.0 and ad_ratio_approx > 1.5:
             breadth_signal = "healthy"
-            breadth_score = 1.5
-            reasoning = "RSP明显强于SPY，广度健康，上涨有广泛参与"
-        elif rsp_vs_spy_diff < -1.0:
+            breadth_score = 2.0
+            breadth_reason = "广度健康：等权强于指数，大部分股票在涨"
+        elif rsp_vs_spy_diff < -1.5:
             breadth_signal = "weak"
-            breadth_score = -1.5
-            reasoning = "RSP明显弱于SPY，广度背离，少数大盘股拉动"
+            breadth_score = -2.0
+            breadth_reason = "广度背离：少数权重股拉动，虚假强势"
+        elif rsp_vs_spy_diff < -0.5 and spy_ret_20d > 0:
+            breadth_signal = "cap_driven"
+            breadth_score = -1.0
+            breadth_reason = "权重驱动：指数涨但等权弱，靠少数大票"
         else:
             breadth_signal = "neutral"
-            breadth_score = rsp_vs_spy_diff * 1.5
-            reasoning = "广度中性，涨跌分布正常"
+            breadth_score = rsp_vs_spy_diff
+            breadth_reason = "广度中性"
+
+        # ===== 5. 趋势质量评分（广度 × 标准差阶段）=====
+        # 广度强度: 强=3, 中=2, 弱=1
+        breadth_strength = 3 if breadth_signal == "healthy" else (2 if breadth_signal == "neutral" else 1)
+        # 标准差阶段: 扩张初期=3, 收缩=2, 极端=1
+        std_strength = 3 if std_phase == "expansion_early" else (2 if std_phase == "contraction" else 1)
+        trend_quality_score = breadth_strength * std_strength  # 1-9
+
+        if trend_quality_score >= 7:
+            trend_quality = "5star"  # ⭐⭐⭐⭐⭐
+            tq_reason = "广度强 + 标准差扩张初期 → 最佳做多点"
+        elif trend_quality_score >= 5:
+            trend_quality = "3star"  # ⭐⭐⭐
+            tq_reason = "趋势尚可，但非最佳"
+        elif trend_quality_score >= 3:
+            trend_quality = "2star"  # ⭐⭐
+            tq_reason = "弱势或极端，谨慎"
+        else:
+            trend_quality = "1star"  # ⭐
+            tq_reason = "假突破或崩盘风险"
 
         steps.append(AnalysisStep(
-            step_name="市场广度分析",
-            input_data=f"RSP 20d={rsp_ret_20d:.2f}%, SPY 20d={spy_ret_20d:.2f}%",
-            calculation=f"RSP-SPY差={rsp_vs_spy_diff:.2f}%",
-            result=f"广度信号={breadth_signal}, 分数={breadth_score:.2f}",
-            reasoning=reasoning
+            step_name="市场广度分析 v2",
+            input_data=f"RSP 20d={rsp_ret_20d:.2f}%, SPY 20d={spy_ret_20d:.2f}%, A/D≈{ad_ratio_approx:.2f}",
+            calculation=f"BB宽度={bb_width:.2f}%, ATR%={atr_pct:.2f}%, Z={zscore:.2f}",
+            result=f"广度={breadth_signal}, 标准差={std_phase}, 趋势质量={trend_quality}",
+            reasoning=f"{breadth_reason}; {std_reason}; {tq_reason}"
         ))
 
         return BreadthAnalysis(
@@ -723,8 +854,16 @@ class MacroScanner:
             spy_ret_20d=spy_ret_20d,
             breadth_signal=breadth_signal,
             breadth_score=breadth_score,
+            std_phase=std_phase,
+            bb_width=bb_width,
+            atr_pct=atr_pct,
+            zscore=zscore,
+            trend_quality=trend_quality,
+            trend_quality_score=trend_quality_score,
+            ad_ratio_approx=round(ad_ratio_approx, 2),
+            nh_nl_signal=nh_nl_signal,
             analysis_steps=steps,
-            raw_data={"rsp": rsp_features, "spy": spy_features},
+            raw_data={"rsp": rsp_features, "spy": spy_features, "bb_pctile": bb_pctile},
         )
 
     def _get_vix_value(self) -> float:
@@ -1205,15 +1344,176 @@ class MacroScanner:
         else:
             return "panic"
 
+    def _calculate_module_bias(
+        self,
+        index_results: List[IndexAnalysis],
+        haven_results: List[SafeHavenAnalysis],
+        credit_result: Optional[CreditAnalysis],
+        breadth_result: Optional[BreadthAnalysis],
+        vix: float,
+        norm_scores: Dict[str, float]
+    ) -> List[ModuleBias]:
+        """计算各模块的多空倾向"""
+        biases = []
+
+        # 1. 权益指数
+        bull = sum(1 for r in index_results if r.trend == "bull")
+        bear = sum(1 for r in index_results if r.trend == "bear")
+        if bull > bear + 1:
+            biases.append(ModuleBias("权益指数", "多", 0.8, f"{bull}牛{bear}熊，多头占优"))
+        elif bear > bull:
+            biases.append(ModuleBias("权益指数", "空", 0.8, f"{bull}牛{bear}熊，空头占优"))
+        else:
+            biases.append(ModuleBias("权益指数", "中性", 0.3, f"{bull}牛{bear}熊，均衡"))
+
+        # 2. 市场广度
+        if breadth_result:
+            if breadth_result.breadth_signal == "healthy":
+                biases.append(ModuleBias("市场广度", "多", 0.9, "广度健康，大部分股票在涨"))
+            elif breadth_result.breadth_signal in ("weak", "cap_driven"):
+                biases.append(ModuleBias("市场广度", "空", 0.7, "广度背离，少数权重股拉动"))
+            else:
+                biases.append(ModuleBias("市场广度", "中性", 0.4, "广度中性"))
+            # 趋势质量
+            if breadth_result.trend_quality == "5star":
+                biases.append(ModuleBias("趋势质量", "多", 0.9, "⭐⭐⭐⭐⭐ 最佳做多点"))
+            elif breadth_result.trend_quality == "1star":
+                biases.append(ModuleBias("趋势质量", "空", 0.7, "⭐ 假突破或崩盘风险"))
+            else:
+                biases.append(ModuleBias("趋势质量", "中性", 0.5, f"{breadth_result.trend_quality} 一般"))
+        else:
+            biases.append(ModuleBias("市场广度", "中性", 0.0, "数据缺失"))
+
+        # 3. VIX/波动率
+        if vix < 15:
+            biases.append(ModuleBias("波动率(VIX)", "多", 0.7, f"VIX={vix:.1f} 平静，利于风险资产"))
+        elif vix < 25:
+            biases.append(ModuleBias("波动率(VIX)", "中性", 0.4, f"VIX={vix:.1f} 正常"))
+        else:
+            biases.append(ModuleBias("波动率(VIX)", "空", 0.8, f"VIX={vix:.1f} 恐慌，避险"))
+
+        # 4. 信用/流动性
+        if credit_result:
+            if credit_result.credit_score > 0.5:
+                biases.append(ModuleBias("信用/流动性", "多", 0.7, "高收益债跑赢，信用偏好强"))
+            elif credit_result.credit_score < -0.5:
+                biases.append(ModuleBias("信用/流动性", "空", 0.7, "信用收缩，曲线倒挂"))
+            else:
+                biases.append(ModuleBias("信用/流动性", "中性", 0.4, "信用中性"))
+        else:
+            biases.append(ModuleBias("信用/流动性", "中性", 0.0, "数据缺失"))
+
+        # 5. 避险资产
+        tlt = next((r for r in haven_results if r.ticker == "TLT"), None)
+        gld = next((r for r in haven_results if r.ticker == "GLD"), None)
+        if tlt and tlt.trend == "bull":
+            biases.append(ModuleBias("避险资产", "空", 0.6, "债券涨=风险偏好弱"))
+        elif gld and gld.trend == "bull":
+            biases.append(ModuleBias("避险资产", "空", 0.5, "黄金涨=避险情绪"))
+        else:
+            biases.append(ModuleBias("避险资产", "多", 0.5, "避险资产弱=风险偏好强"))
+
+        # 6. 美元
+        uup = next((r for r in haven_results if r.ticker == "UUP"), None)
+        if uup and uup.ret_20d > 0:
+            biases.append(ModuleBias("美元", "空", 0.5, "美元强=压制风险资产"))
+        else:
+            biases.append(ModuleBias("美元", "多", 0.4, "美元弱=利好风险资产"))
+
+        # 7. BTC
+        btc = next((r for r in haven_results if r.ticker == "BTC-USD"), None)
+        if btc and btc.ret_20d > 0:
+            biases.append(ModuleBias("比特币", "多", 0.5, "BTC涨=风险偏好强"))
+        elif btc and btc.ret_20d < -5:
+            biases.append(ModuleBias("比特币", "空", 0.6, "BTC暴跌=风险偏好弱"))
+        else:
+            biases.append(ModuleBias("比特币", "中性", 0.3, "BTC震荡"))
+
+        return biases
+
+    def _forecast_outlook(
+        self,
+        regime: str,
+        score: int,
+        norm_scores: Dict[str, float],
+        module_bias: List[ModuleBias],
+        vix: float,
+        breadth_result: Optional[BreadthAnalysis]
+    ) -> Tuple[str, str, float, float, str]:
+        """预测未来5天/30天市场倾向"""
+        # 统计多空倾向
+        bull_modules = [b for b in module_bias if b.bias == "多"]
+        bear_modules = [b for b in module_bias if b.bias == "空"]
+        bull_strength = sum(b.strength for b in bull_modules)
+        bear_strength = sum(b.strength for b in bear_modules)
+
+        # 短期(5天)：更敏感，权重给 VIX、广度、BTC
+        short_signals = []
+        if vix > 30:
+            short_signals.append("panic")
+        elif vix < 15:
+            short_signals.append("calm")
+        if breadth_result:
+            if breadth_result.std_phase == "expansion_extreme":
+                short_signals.append("mean_reversion")
+            elif breadth_result.std_phase == "contraction":
+                short_signals.append("breakout_soon")
+        if norm_scores.get("btc", 0) < -1:
+            short_signals.append("risk_off")
+
+        # 5天预测
+        if "panic" in short_signals or bear_strength > bull_strength + 1.0:
+            forecast_5d = "空"
+            fc_conf_5d = min(0.9, bear_strength / max(bull_strength + bear_strength, 1))
+        elif "mean_reversion" in short_signals and score > 7:
+            forecast_5d = "空"  # 极端后的回调
+            fc_conf_5d = 0.6
+        elif bull_strength > bear_strength + 0.5:
+            forecast_5d = "多"
+            fc_conf_5d = min(0.85, bull_strength / max(bull_strength + bear_strength, 1))
+        else:
+            forecast_5d = "中性"
+            fc_conf_5d = 0.4
+
+        # 长期(30天)：更看趋势、信用、宏观结构
+        long_signals = []
+        if score >= 7 and norm_scores.get("credit", 0) > 0:
+            long_signals.append("strong_bull")
+        if score <= 4 and norm_scores.get("credit", 0) < 0:
+            long_signals.append("strong_bear")
+        if breadth_result and breadth_result.breadth_signal == "weak":
+            long_signals.append("breadth_divergence")
+        if norm_scores.get("safe_haven", 0) < -0.5:
+            long_signals.append("risk_off_building")
+
+        if "strong_bull" in long_signals and "breadth_divergence" not in long_signals:
+            forecast_30d = "多"
+            fc_conf_30d = 0.75
+        elif "strong_bear" in long_signals or "risk_off_building" in long_signals:
+            forecast_30d = "空"
+            fc_conf_30d = 0.7
+        elif "breadth_divergence" in long_signals and score > 6:
+            forecast_30d = "空"  # 顶背离
+            fc_conf_30d = 0.6
+        else:
+            forecast_30d = "中性"
+            fc_conf_30d = 0.4
+
+        reason = f"短期: {', '.join(short_signals) if short_signals else '信号均衡'}; 长期: {', '.join(long_signals) if long_signals else '趋势延续'}"
+        return forecast_5d, forecast_30d, round(fc_conf_5d, 2), round(fc_conf_30d, 2), reason
+
     def _generate_summary(
         self,
         regime: str,
         score: int,
         confidence: str,
         drivers: List[str],
-        warnings: List[str]
+        warnings: List[str],
+        module_bias: List[ModuleBias] = None,
+        forecast_5d: str = "中性",
+        forecast_30d: str = "中性"
     ) -> str:
-        """生成摘要"""
+        """生成摘要 v2 - 增强版（含模块倾向 + 未来预测）"""
         regime_desc = {
             "Risk-On": "市场风险偏好积极，资金流向风险资产",
             "Risk-Off": "市场风险偏好低迷，资金涌入避险资产",
@@ -1221,25 +1521,45 @@ class MacroScanner:
         }
 
         lines = [
-            f"┌{'─'*58}┐",
-            f"│{'宏观全景扫描报告 v2':^56}│",
-            f"├{'─'*58}┤",
-            f"│ 市场状态: {regime}{' '*max(0, 46-len(regime))}│",
-            f"│ 环境评分: {score}/10{' '*42}│",
-            f"│ 置信度: {confidence}{' '*max(0, 48-len(confidence))}│",
-            f"├{'─'*58}┤",
-            f"│ 主导因子: {', '.join(drivers[:3])}{' '*max(0, 47-len(', '.join(drivers[:3])))}│",
+            f"📊 宏观全景扫描报告 v2",
+            f"",
+            f"**市场状态**: {regime}",
+            f"**环境评分**: {score}/10",
+            f"**置信度**: {confidence}",
+            f"**主导因子**: {', '.join(drivers[:3])}",
         ]
 
+        # 各模块多空倾向 — Markdown 表格
+        if module_bias:
+            lines.append("")
+            lines.append("**各模块倾向**:")
+            lines.append("")
+            lines.append("| 模块 | 倾向 | 强度 | 说明 |")
+            lines.append("|------|------|------|------|")
+            for b in module_bias:
+                emoji = {"多": "🟢", "空": "🔴", "中性": "⚪"}.get(b.bias, "⚪")
+                lines.append(f"| {emoji} {b.name} | {b.bias} | {b.strength:.0%} | {b.detail} |")
+
+        # 未来预测 — Markdown 表格
+        lines.append("")
+        lines.append("**未来展望**:")
+        lines.append("")
+        lines.append("| 时间维度 | 倾向 | 图标 |")
+        lines.append("|----------|------|------|")
+        fc_emoji_5d = {"多": "📈", "空": "📉", "中性": "➡️"}.get(forecast_5d, "➡️")
+        fc_emoji_30d = {"多": "📈", "空": "📉", "中性": "➡️"}.get(forecast_30d, "➡️")
+        lines.append(f"| 未来5天  | {forecast_5d} | {fc_emoji_5d} |")
+        lines.append(f"| 未来30天 | {forecast_30d} | {fc_emoji_30d} |")
+
         if warnings:
-            lines.append(f"├{'─'*58}┤")
-            for w in warnings[:2]:
-                lines.append(f"│ {w[:56]}{' '*max(0, 56-len(w[:56]))}│")
+            lines.append(f"")
+            lines.append(f"**风险预警**:")
+            for w in warnings[:3]:
+                lines.append(f"- {w}")
 
         lines.extend([
-            f"├{'─'*58}┤",
-            f"│ {regime_desc.get(regime, '')[:56]}{' '*max(0, 56-len(regime_desc.get(regime, '')[:56]))}│",
-            f"└{'─'*58}┘",
+            f"",
+            f"{regime_desc.get(regime, '')}",
         ])
 
         return "\n".join(lines)

@@ -177,6 +177,24 @@ class PaperTrader:
                 mode=self.mode,
             )
 
+    def get_trade_history(self, days: int = 30) -> pd.DataFrame:
+        """获取交易历史（从storage读取）"""
+        if self.storage:
+            try:
+                return self.storage.get_trades(days=days)
+            except Exception as e:
+                logger.warning(f"[Paper] 读取交易历史失败: {e}")
+        return pd.DataFrame()
+
+    def get_equity_curve(self, days: int = 30) -> pd.DataFrame:
+        """获取净值曲线（从storage读取）"""
+        if self.storage:
+            try:
+                return self.storage.get_equity(days=days)
+            except Exception as e:
+                logger.warning(f"[Paper] 读取净值曲线失败: {e}")
+        return pd.DataFrame()
+
     def reset(self):
         """重置账户"""
         self.cash = self.initial_cash

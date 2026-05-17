@@ -1,13 +1,16 @@
 # ============================================================
-# dashboard/app.py - Streamlit Web Dashboard (v5)
-# - 页面顶部 tabs，移除 sidebar
-# - 每个 tab 内容独立，内部包含所有必要参数
-# - 语言选择移至 Settings tab
+# dashboard/app.py - Streamlit Web Dashboard (v6)
+# Changes:
+# 1. AI tab moved to first position
+# 2. All hardcoded Chinese removed (use t() with fallback)
+# 3. ASCII box lines removed from optimize tab
+# 4. Tab descriptions added
 # ============================================================
 import os
 import sys
 import importlib
 from pathlib import Path
+from datetime import datetime
 
 import streamlit as st
 import pandas as pd
@@ -23,6 +26,8 @@ _RELOAD_MODULES = [
     "strategy.technical", "strategy.composite", "strategy.base",
     "backtest.engine", "data.fetcher", "data.storage",
     "risk.manager", "trading.paper", "trading.bot",
+    "trading.signal_explainer", "trading.equity_tracker",
+    "trading.order_manager", "trading.bot_enhanced",
     "ai.market_analyzer", "ai.stock_screener", "ai.orchestrator",
     "ai.macro_scanner",
 ]
@@ -104,10 +109,10 @@ st.markdown(
 # Header: Title (left) + Tabs (right) via CSS flex
 # ============================================================
 TAB_LABELS = [
+    f"🤖 {t('app.mode_ai')}",
     f"📊 {t('app.mode_backtest')}",
     f"📈 {t('app.mode_paper')}",
     f"🔴 {t('app.mode_live')}",
-    f"🤖 {t('app.mode_ai')}",
     f"⚙️ {t('app.mode_optimize')}",
     f"🔧 {t('app.mode_settings')}",
 ]
@@ -180,17 +185,389 @@ div.block-container {{
 """, unsafe_allow_html=True)
 
 # Tabs immediately after the header HTML — CSS will pull them into the header row
-tab_backtest, tab_paper, tab_live, tab_ai, tab_optimize, tab_settings = st.tabs(TAB_LABELS)
+tab_ai, tab_backtest, tab_paper, tab_live, tab_optimize, tab_settings = st.tabs(TAB_LABELS)
 
 # Thin separator below tabs
 st.markdown("<style>div[data-testid='stTabs'] {{ border-bottom: 2px solid #e0e0e0; }}</style>", unsafe_allow_html=True)
 
 
 # ============================================================
-# TAB 0: Backtest Mode
+# TAB 0: AI Analysis Mode (MOVED TO FIRST)
+# ============================================================
+with tab_ai:
+    st.markdown(f"### 🤖 {t('ai_analysis.title')}")
+    st.caption(t("ui.ai_tab_desc") if t("ui.ai_tab_desc") != "ui.ai_tab_desc" else "AI-powered multi-dimensional market analysis")
+
+    if "macro_scan_done" not in st.session_state:
+        st.session_state["macro_scan_done"] = False
+    if "macro_scan_result" not in st.session_state:
+        st.session_state["macro_scan_result"] = None
+
+    def _render_env_banner(macro_result):
+        if macro_result is None:
+            return
+        score = macro_result.environment.environment_score
+        risk = macro_result.environment.risk_appetite
+        if risk == "Risk-Off" or score <= 3:
+            st.error(f"⚠️ **{t('ui.environment_fail')}** — {t('ui.macro_high_risk')}")
+        elif score <= 5 or risk == "Neutral":
+            st.warning(f"⚠️ **{t('ui.environment_warn')}** — {t('ui.macro_caution')}")
+
+    if st.session_state["macro_scan_result"] is not None:
+        _render_env_banner(st.session_state["macro_scan_result"])
+
+    ai_tab0, ai_tab1, ai_tab2, ai_tab3 = st.tabs([
+        f"🌐 {t('ui.tab_macro')}",
+        f"📊 {t('ui.tab_market')}",
+        f"🔍 {t('ui.tab_screener')}",
+        f"📋 {t('ui.tab_report')}",
+    ])
+
+    with ai_tab0:
+        st.markdown(f"#### {t('ui.macro_scan')}")
+        st.caption(t("ui.macro_scan_desc"))
+
+        if st.button(f"🔍 {t('ui.scan_now')}", key="macro_scan_btn"):
+            with st.spinner(t("ui.scanning")):
+                try:
+                    from ai.macro_scanner import MacroScanner
+                    scanner = MacroScanner()
+                    scan_result = scanner.scan()
+                    st.session_state["macro_scan_result"] = scan_result
+                    st.session_state["macro_scan_done"] = True
+
+                    # Core metrics
+                    sc1, sc2, sc3, sc4 = st.columns(4)
+                    sc1.metric(t("ui.overall_score"), f"{scan_result.environment.macro_env_score}/10")
+                    sc2.metric(t("ui.macro_regime"), scan_result.environment.regime)
+                    sc3.metric(t("ui.macro_confidence"), t(f"confidence_{scan_result.environment.confidence}"))
+                    sc4.metric("VIX", f"{scan_result.vix:.2f} ({scan_result.environment.vix_signal})")
+
+                    # Probability distribution
+                    st.markdown(f"#### {t('ui.macro_probability')}")
+                    prob_col1, prob_col2, prob_col3 = st.columns(3)
+                    prob_col1.metric(f"{t('ui.macro_p_risk_on')}", f"{scan_result.environment.P_risk_on*100:.1f}%")
+                    prob_col2.metric(f"{t('ui.macro_p_neutral')}", f"{scan_result.environment.P_neutral*100:.1f}%")
+                    prob_col3.metric(f"{t('ui.macro_p_risk_off')}", f"{scan_result.environment.P_risk_off*100:.1f}%")
+
+                    # Key drivers
+                    if scan_result.environment.key_drivers:
+                        st.markdown(f"#### 🔑 {t('ui.macro_key_drivers')}")
+                        st.markdown(", ".join(scan_result.environment.key_drivers))
+
+                    # Risk warnings
+                    if scan_result.environment.warnings:
+                        st.markdown(f"#### ⚠️ {t('ui.macro_warnings')}")
+                        for w in scan_result.environment.warnings:
+                            st.warning(w)
+                    else:
+                        st.info(f"✅ {t('ui.no_warnings')}")
+
+                    # Module bias 表格
+                    if scan_result.environment.module_bias:
+                        st.markdown(f"#### 📊 {t('ui.macro_module_bias') if t('ui.macro_module_bias') != 'ui.macro_module_bias' else '各模块多空倾向'}")
+                        bias_data = []
+                        for b in scan_result.environment.module_bias:
+                            bias_data.append({
+                                "模块": b.name,
+                                "倾向": b.bias,
+                                "强度": f"{b.strength:.0%}",
+                                "说明": b.detail,
+                            })
+                        st.dataframe(pd.DataFrame(bias_data), use_container_width=True, hide_index=True)
+
+                    # Future forecast
+                    st.markdown(f"#### 🔮 {t('ui.macro_forecast') if t('ui.macro_forecast') != 'ui.macro_forecast' else '未来展望'}")
+                    fc_data = [{
+                        "时间维度": "未来5天",
+                        "倾向": scan_result.environment.forecast_5d,
+                        "置信度": f"{scan_result.environment.forecast_confidence_5d:.0%}",
+                    }, {
+                        "时间维度": "未来30天",
+                        "倾向": scan_result.environment.forecast_30d,
+                        "置信度": f"{scan_result.environment.forecast_confidence_30d:.0%}",
+                    }]
+                    st.dataframe(pd.DataFrame(fc_data), use_container_width=True, hide_index=True)
+
+                    # Module scores
+                    with st.expander(f"📊 {t('ui.macro_module_scores')}", expanded=False):
+                        mod_col1, mod_col2 = st.columns(2)
+                        with mod_col1:
+                            for mod, score in list(scan_result.environment.module_scores.items())[:4]:
+                                st.metric(f"{t(f'ui.macro_module_{mod}') if t(f'ui.macro_module_{mod}') != f'ui.macro_module_{mod}' else mod}", f"{score:.2f}")
+                        with mod_col2:
+                            for mod, score in list(scan_result.environment.module_scores.items())[4:]:
+                                st.metric(f"{t(f'ui.macro_module_{mod}') if t(f'ui.macro_module_{mod}') != f'ui.macro_module_{mod}' else mod}", f"{score:.2f}")
+
+                    st.markdown(f"### 📝 {t('ui.macro_summary')}")
+                    st.markdown(scan_result.environment.summary)
+
+                    if scan_result.index_results:
+                        st.markdown(f"#### 📊 {t('ui.macro_index_table')}")
+                        idx_data = []
+                        for r in scan_result.index_results:
+                            idx_data.append({
+                                t('ui.ticker'): f"{r.ticker} ({r.name})",
+                                t('ui.trend'): r.trend,
+                                t('ui.weekly_return') if t('ui.weekly_return') != 'ui.weekly_return' else 'Weekly Return': f"{r.ret_5d:+.2f}%",
+                                t('ui.monthly_return') if t('ui.monthly_return') != 'ui.monthly_return' else 'Monthly Return': f"{r.ret_20d:+.2f}%",
+                                t('ui.volume_ratio') if t('ui.volume_ratio') != 'ui.volume_ratio' else 'Vol Ratio': f"{r.volume_ratio:.2f}",
+                            })
+                        st.dataframe(pd.DataFrame(idx_data), use_container_width=True, hide_index=True)
+
+                    if scan_result.haven_results:
+                        st.markdown(f"#### 🛡️ {t('ui.macro_safe_table')}")
+                        haven_data = []
+                        for r in scan_result.haven_results:
+                            haven_data.append({
+                                t('ui.asset'): f"{r.ticker} ({r.name})",
+                                t('ui.trend'): r.trend,
+                                t('ui.weekly_return') if t('ui.weekly_return') != 'ui.weekly_return' else 'Weekly Return': f"{r.ret_5d:+.2f}%",
+                                t('ui.monthly_return') if t('ui.monthly_return') != 'ui.monthly_return' else 'Monthly Return': f"{r.ret_20d:+.2f}%",
+                                t('ui.abnormal') if t('ui.abnormal') != 'ui.abnormal' else 'Abnormal': "⚠️ " + t('ui.yes') if r.is_abnormal else t('ui.no_text'),
+                            })
+                        st.dataframe(pd.DataFrame(haven_data), use_container_width=True, hide_index=True)
+
+                    # Credit/Liquidity analysis
+                    if scan_result.credit_result:
+                        st.markdown(f"#### 💳 {t('ui.macro_credit_analysis')}")
+                        credit = scan_result.credit_result
+                        credit_data = [{
+                            t('ui.macro_hyg_lqd'): f"{credit.hyg_lqd_ratio:.3f}",
+                            t('ui.macro_yield_curve'): f"{credit.spread_10y_2y:.2f}%",
+                            t('ui.macro_curve_status'): credit.curve_status,
+                            t('ui.score'): f"{credit.credit_score:.2f}",
+                        }]
+                        st.dataframe(pd.DataFrame(credit_data), use_container_width=True, hide_index=True)
+
+                    # Market breadth analysis
+                    if scan_result.breadth_result:
+                        st.markdown(f"#### 📈 {t('ui.macro_breadth_analysis')}")
+                        breadth = scan_result.breadth_result
+                        breadth_data = [{
+                            t('ui.macro_rsp_vs_spy'): f"{breadth.rsp_vs_spy_diff:+.2f}%",
+                            "RSP 20d": f"{breadth.rsp_ret_20d:+.2f}%",
+                            "SPY 20d": f"{breadth.spy_ret_20d:+.2f}%",
+                            t('ui.macro_breadth_signal'): breadth.breadth_signal,
+                        }]
+                        st.dataframe(pd.DataFrame(breadth_data), use_container_width=True, hide_index=True)
+
+                    # Sector rotation analysis
+                    try:
+                        from ai.sector_rotation import SectorRotationAnalyzer
+                        sector_analyzer = SectorRotationAnalyzer()
+                        sector_result = sector_analyzer.analyze(period="3mo")
+
+                        st.markdown(f"#### 🔄 {t('ui.sector_rotation') if t('ui.sector_rotation') != 'ui.sector_rotation' else '板块轮动'}")
+
+                        # Market phase badge
+                        phase_map = {
+                            "early_bull": ("🟢", "牛市早期"),
+                            "late_bull": ("🟡", "牛市晚期"),
+                            "bear": ("🔴", "熊市"),
+                            "recovery": ("🔵", "恢复期"),
+                        }
+                        phase_emoji, phase_name = phase_map.get(sector_result.market_phase, ("⚪", sector_result.market_phase))
+                        st.markdown(f"**{phase_emoji} 市场阶段: {phase_name}**")
+
+                        # Sector ranking table
+                        if sector_result.sectors:
+                            st.markdown("**板块强弱排名**")
+                            sector_data = []
+                            for i, s in enumerate(sorted(sector_result.sectors, key=lambda x: x.momentum_score, reverse=True)):
+                                sector_data.append({
+                                    "排名": i + 1,
+                                    "板块": f"{s.ticker} ({s.name_zh or s.name})",
+                                    "5日%": f"{s.returns_5d:+.2f}%",
+                                    "20日%": f"{s.returns_20d:+.2f}%",
+                                    "动量": f"{s.momentum_score:.1f}",
+                                    "量能": f"{s.volume_change:+.1f}%",
+                                })
+                            st.dataframe(pd.DataFrame(sector_data), use_container_width=True, hide_index=True)
+
+                        # Rotation signals
+                        if sector_result.rotation_signals:
+                            st.markdown("**轮动信号**")
+                            for sig in sector_result.rotation_signals:
+                                sig_emoji = {"defensive": "🛡️", "offensive": "⚔️", "neutral": "⚖️"}.get(sig.type, "📊")
+                                st.markdown(f"{sig_emoji} **{sig.description}** (强度: {sig.strength:.0%})")
+
+                        # Summary
+                        if sector_result.summary:
+                            st.info(sector_result.summary)
+
+                    except Exception as e:
+                        st.caption(f"板块轮动分析暂不可用: {e}")
+
+                except Exception as e:
+                    import traceback
+                    st.error(f"{t('ui.macro_no_data')}: {e}")
+                    st.code(traceback.format_exc())
+
+    with ai_tab1:
+        st.markdown(f"#### {t('ai_analysis.market_analyze')}")
+
+        if st.button(f"🔄 {t('ui.analyze_current_market')}", key="analyze_market"):
+            with st.spinner(t("ui.analyzing_market")):
+                try:
+                    from ai.market_analyzer import MarketAnalyzer
+                    analyzer = MarketAnalyzer()
+                    state = analyzer.analyze()
+
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric(t("ai_analysis.trend"), state.trend)
+                    m2.metric(t("ai_analysis.volatility"), state.volatility)
+                    m3.metric(t("ai_analysis.momentum"), state.momentum)
+                    m4.metric(t("ai_analysis.risk_level"), f"{state.risk_level}/10")
+
+                    rec_str = ', '.join(state.recommended_strategies) if state.recommended_strategies else ''
+                    st.markdown(f"**{t('ui.recommended_strategies')}:** {rec_str}")
+                    st.info(state.analysis_text)
+
+                    if state.analysis_steps:
+                        with st.expander(f"📝 {t('ui.analysis_steps')}", expanded=False):
+                            for step in state.analysis_steps:
+                                st.markdown(f"**{step.step_name}**")
+                                st.caption(f"{t('ui.input_data')}: {step.input_data}")
+                                st.markdown(f"{t('ui.calculation')}: `{step.calculation}`")
+                                st.markdown(f"{t('ui.result')}: {step.result}")
+                                st.markdown(f"{t('ui.logic')}: {step.reasoning}")
+                                st.markdown("---")
+
+                    if state.raw_data:
+                        with st.expander(f"📊 {t('ui.raw_data')}", expanded=False):
+                            st.json(state.raw_data)
+
+                except Exception as e:
+                    import traceback
+                    st.error(f"{t('ui.macro_no_data')}: {e}")
+                    st.code(traceback.format_exc())
+
+    with ai_tab2:
+        st.markdown(f"#### {t('ai_analysis.screener_pool')}")
+
+        macro_result = st.session_state.get("macro_scan_result")
+        if macro_result is not None and macro_result.environment.environment_score < 4:
+            st.warning(f"⚠️ {t('ui.environment_warn')} — {t('ui.macro_caution')}")
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            pool = st.selectbox(
+                t("ui.stock_pool"), ["popular", "tech", "etf"],
+                format_func=lambda x: {"popular": t("ui.popular_stocks"), "tech": t("ui.tech_stocks"), "etf": "ETF"}[x],
+                key="ai_pool",
+            )
+        with col2:
+            top_n = st.number_input(t("ai_analysis.screener_top_n"), min_value=5, max_value=50, value=10, key="ai_topn")
+
+        if st.button(f"🔍 {t('ai_analysis.screener_run')}", key="screen_stocks"):
+            with st.spinner(t("ui.screening")):
+                try:
+                    from ai.stock_screener import StockScreener
+                    screener = StockScreener()
+                    candidates = screener.screen(pool_name=pool, top_n=top_n)
+
+                    if candidates:
+                        results = []
+                        for c in candidates:
+                            results.append({
+                                t("ui.ticker"): c.ticker,
+                                t("ui.score"): f"{c.score:.0f}",
+                                t("ui.signal"): c.signal,
+                                t("ui.price"): f"${c.price:.2f}",
+                                t("ui.reason"): c.reason,
+                            })
+                        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+                    else:
+                        st.warning(t("ui.no_condition"))
+                except Exception as e:
+                    import traceback
+                    st.error(f"{t('ui.macro_no_data')}: {e}")
+                    st.code(traceback.format_exc())
+
+    with ai_tab3:
+        st.markdown(f"#### {t('ui.daily_report')}")
+        watchlist = st.text_area(
+            t("ai_analysis.report_watchlist"),
+            value="AAPL,MSFT,GOOGL,AMZN,NVDA,META,TSLA", height=68, key="ai_watchlist",
+        )
+
+        if st.button(f"📋 {t('ai_analysis.report_generate')}", key="generate_report"):
+            with st.spinner(t("ui.analyzing_market")):
+                try:
+                    from ai.orchestrator import AIQuantAnalyst
+                    import yaml
+
+                    config_path = BASE_DIR / "config.yaml"
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config = yaml.safe_load(f)
+
+                    analyst = AIQuantAnalyst(config=config)
+                    tickers_list = [tk.strip().upper() for tk in watchlist.split(",") if tk.strip()]
+                    report = analyst.run_daily_analysis(watchlist=tickers_list, generate_report=False)
+
+                    st.markdown(f"**{t('ui.date')}: {report.date}**")
+                    ms = report.market_state
+                    r1, r2, r3, r4 = st.columns(4)
+                    r1.metric(t("ai_analysis.trend"), ms.get("trend", "unknown"))
+                    r2.metric(t("ai_analysis.volatility"), ms.get("volatility", "unknown"))
+                    r3.metric(t("ai_analysis.momentum"), ms.get("momentum", "unknown"))
+                    r4.metric(t("ai_analysis.risk_level"), f"{ms.get('risk_level', 5)}/10")
+
+                    recommended = ms.get("recommended_strategies", [])
+                    if recommended:
+                        rec_str = ', '.join(recommended)
+                        st.markdown(f"**{t('ui.recommended_strategies')}:** {rec_str}")
+
+                    analysis = ms.get("analysis", "")
+                    if analysis:
+                        st.info(analysis)
+
+                    if report.top_opportunities:
+                        st.markdown(f"### 🔥 {t('ui.top_opportunities')}")
+                        opp_data = []
+                        for opp in report.top_opportunities:
+                            opp_data.append({
+                                t('ui.ticker'): opp.get("ticker", ""),
+                                t('ui.score'): f"{opp.get('score', 0):.0f}",
+                                t('ui.signal'): opp.get("signal", ""),
+                                t('ui.price'): f"${opp.get('price', 0):.2f}",
+                                t('ui.reason'): opp.get("reason", ""),
+                            })
+                        st.dataframe(pd.DataFrame(opp_data), use_container_width=True, hide_index=True)
+
+                    if report.strategy_recommendations:
+                        st.markdown(f"### 📊 {t('ui.strategy_recommendations')}")
+                        rec_data = []
+                        for rec in report.strategy_recommendations:
+                            rec_data.append({
+                                t('ui.ticker'): rec.get("ticker", ""),
+                                t('ui.recommended_strategies') if t('ui.recommended_strategies') != 'ui.recommended_strategies' else 'Recommended Strategies': ", ".join(rec.get("strategies", [])),
+                                t('ui.reason'): rec.get("reason", ""),
+                            })
+                        st.dataframe(pd.DataFrame(rec_data), use_container_width=True, hide_index=True)
+
+                    if report.risk_alerts:
+                        st.markdown(f"### ⚠️ {t('ui.risk_alerts')}")
+                        for alert in report.risk_alerts:
+                            st.warning(alert)
+
+                    if report.ai_summary:
+                        st.markdown(f"### 🤖 {t('ui.summary')}")
+                        st.markdown(report.ai_summary)
+
+                except Exception as e:
+                    import traceback
+                    st.error(f"{t('ui.macro_no_data')}: {e}")
+                    st.code(traceback.format_exc())
+
+
+# ============================================================
+# TAB 1: Backtest Mode
 # ============================================================
 with tab_backtest:
     st.markdown(f"### 📋 {t('app.mode_backtest')}")
+    st.caption(t("ui.backtest_tab_desc") if t("ui.backtest_tab_desc") != "ui.backtest_tab_desc" else "Strategy backtesting with multi-strategy voting")
 
     # Parameters for this tab
     col_ticker, col_period = st.columns([1, 1])
@@ -488,118 +865,511 @@ with tab_backtest:
 
 
 # ============================================================
-# TAB 1: Paper Trading Mode
+# TAB 2: Paper Trading Mode (Enhanced)
 # ============================================================
 with tab_paper:
     st.markdown(f"### 💹 {t('paper_trading.title')}")
+    st.caption(t("ui.paper_tab_desc") if t("ui.paper_tab_desc") != "ui.paper_tab_desc" else "Simulated trading with real-time signal monitoring, equity tracking, and strategy configuration")
 
-    if "paper_bot_status" not in st.session_state:
-        st.session_state["paper_bot_status"] = {"is_running": False, "total_checks": 0, "total_trades": 0}
-    if "paper_positions" not in st.session_state:
-        st.session_state["paper_positions"] = {}
-    if "paper_trades" not in st.session_state:
-        st.session_state["paper_trades"] = []
+    # Session state init
+    if "enhanced_bot" not in st.session_state:
+        st.session_state["enhanced_bot"] = None
     if "paper_cash" not in st.session_state:
         st.session_state["paper_cash"] = 100000.0
 
-    paper_tab1, paper_tab2, paper_tab3, paper_tab4 = st.tabs([
-        f"🤖 {t('paper_trading.bot_control')}",
-        t("paper_trading.signal_monitor"),
-        t("risk.status_title"),
-        t("paper_trading.positions"),
-    ])
+    # Lazy imports
+    try:
+        from trading.paper import PaperTrader
+        from trading.bot_enhanced import EnhancedPaperTradingBot
+        from trading.order_manager import OrderManager
+        from trading.equity_tracker import EquityTracker
+        from trading.signal_explainer import SignalExplainer
+        from trading.strategy_config import StrategyConfigManager
+        from risk.manager import RiskManager
+        from data.fetcher import YFinanceFetcher
+        from strategy.composite import CompositeStrategy
+        ENHANCED_AVAILABLE = True
+    except Exception as e:
+        ENHANCED_AVAILABLE = False
+        st.error(f"{t('paper_enhanced.enhanced_load_failed')}: {e}")
 
-    with paper_tab1:
-        st.markdown(f"**{t('paper_trading.bot_control')}**")
+    if ENHANCED_AVAILABLE:
+        # Initialize components if not exists
+        if "paper_trader" not in st.session_state:
+            st.session_state["paper_trader"] = PaperTrader(
+                initial_cash=st.session_state["paper_cash"]
+            )
+        if "strategy_config" not in st.session_state:
+            st.session_state["strategy_config"] = StrategyConfigManager()
+        if "risk_mgr" not in st.session_state:
+            st.session_state["risk_mgr"] = RiskManager()
 
-        col_left, col_right = st.columns([2, 1])
-        with col_left:
+        trader = st.session_state["paper_trader"]
+        scm = st.session_state["strategy_config"]
+        risk_mgr = st.session_state["risk_mgr"]
+
+        # Bot control
+        bot = st.session_state.get("enhanced_bot")
+        is_running = bot.is_running if bot else False
+
+        # Top control bar
+        ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([2, 1, 1, 1])
+
+        with ctrl_col1:
             paper_tickers_input = st.text_input(
-                t("paper_trading.monitor_tickers"), value="AAPL,MSFT,GOOGL", key="pt_tickers",
+                t("paper_trading.monitor_tickers"),
+                value="AAPL,MSFT,GOOGL",
+                key="pt_tickers",
             )
             paper_tickers = [tk.strip().upper() for tk in paper_tickers_input.split(",") if tk.strip()]
+
+        with ctrl_col2:
             paper_interval = st.select_slider(
                 t("paper_trading.monitor_interval"),
-                options=[1, 5, 15, 30, 60], value=15, key="pt_interval",
-                format_func=lambda x: f"{x} {t('ui.minutes')}",
+                options=[1, 5, 15, 30, 60],
+                value=15,
+                key="pt_interval",
+                format_func=lambda x: f"{x} min",
             )
 
-        with col_right:
-            status = st.session_state["paper_bot_status"]
-            is_running = status.get("is_running", False)
-            st.markdown(f"**{t('ui.current_status')}:** {'🟢 ' + t('ui.running') if is_running else '🔴 ' + t('ui.stopped')}")
-            st.metric(t("paper_trading.check_count"), status.get("total_checks", 0))
-            st.metric(t("paper_trading.trade_count"), status.get("total_trades", 0))
+        with ctrl_col3:
+            st.metric(t('ui.current_status'), f"🟢 {t('paper_enhanced.status_running')}" if is_running else f"🔴 {t('paper_enhanced.status_stopped')}")
+            if bot:
+                status = bot.get_status()
+                st.metric(t('paper_trading.check_count'), status.get("check_count", 0))
 
-        pt_btn1, pt_btn2 = st.columns(2)
-        with pt_btn1:
+        with ctrl_col4:
+            st.metric(t('paper_trading.trade_count'), status.get("trade_count", 0) if bot else 0)
+            st.metric(t('paper_enhanced.equity'), f"${trader.cash + sum(p.get('qty',0)*p.get('avg_cost',0) for p in trader.positions.values()):,.0f}")
+
+        btn_col1, btn_col2, btn_col3 = st.columns(3)
+
+        with btn_col1:
             if st.button(f"▶️ {t('ui.start_monitor')}", disabled=is_running, key="pt_start", use_container_width=True):
                 try:
-                    from data.fetcher import YFinanceFetcher
-                    from trading.paper import PaperTrader
-                    from strategy.composite import CompositeStrategy
-                    from risk.manager import RiskManager
-                    from trading.bot import create_bot
+                    # Create default strategy instances if none exist
+                    if not scm.get_active_instances():
+                        for ticker in paper_tickers[:3]:
+                            scm.create_instance("MA_Cross", ticker, weight=1.0/3, tags=["default"])
 
-                    fetcher = YFinanceFetcher()
-                    trader = PaperTrader(initial_cash=st.session_state.get("paper_cash", 100000.0))
-                    strategy = CompositeStrategy()
-                    risk_mgr = RiskManager()
-                    bot = create_bot(
-                        trader=trader,
-                        fetcher=fetcher,
-                        strategy=strategy,
-                        tickers=paper_tickers,
-                        interval_minutes=paper_interval,
+                    bot = EnhancedPaperTradingBot(
+                        paper_trader=trader,
                         risk_manager=risk_mgr,
+                        strategy_config=scm,
+                        check_interval=paper_interval * 60,
                     )
                     bot.start()
-                    st.session_state["paper_bot_status"]["is_running"] = True
+                    st.session_state["enhanced_bot"] = bot
                     st.success(t("ui.bot_started"))
+                    st.rerun()
                 except Exception as e:
                     st.error(f"{t('common.error')}: {e}")
 
-        with pt_btn2:
+        with btn_col2:
             if st.button(f"⏹️ {t('ui.stop_monitor')}", disabled=not is_running, key="pt_stop", use_container_width=True):
                 try:
-                    from trading.bot import get_bot
-                    bot = get_bot()
                     if bot:
                         bot.stop()
-                    st.session_state["paper_bot_status"]["is_running"] = False
+                    st.session_state["enhanced_bot"] = None
                     st.success(t("ui.bot_stopped"))
+                    st.rerun()
                 except Exception as e:
                     st.error(f"{t('common.error')}: {e}")
+
+        with btn_col3:
+            if st.button(f"🔄 {t('paper_enhanced.reset_account')}", key="pt_reset", use_container_width=True):
+                trader.reset()
+                st.session_state["paper_cash"] = 100000.0
+                st.success(t('paper_enhanced.account_reset'))
                 st.rerun()
 
-    with paper_tab2:
-        st.markdown(f"**{t('paper_trading.signal_monitor')}**")
-        st.info(t("paper_trading.manual_check_hint"))
+        st.divider()
 
-    with paper_tab3:
-        st.markdown(f"**{t('risk.status_title')}**")
-        st.metric(t("risk.per_trade"), f"{risk_pct:.1%}" if 'risk_pct' in dir() else "2.0%")
-        st.metric(t("risk.stop_loss_atr"), "2.0x ATR")
-        st.metric(t("risk.take_profit_atr"), "3.0x ATR")
+        # Sub-tabs for enhanced features
+        pt_sub1, pt_sub2, pt_sub3, pt_sub4, pt_sub5, pt_sub6 = st.tabs([
+            f"📊 {t('paper_enhanced.overview')}",
+            f"📜 {t('paper_enhanced.trade_history')}",
+            f"📡 {t('paper_enhanced.signal_analysis')}",
+            f"⚙️ {t('paper_enhanced.strategy_config')}",
+            f"🛡️ {t('paper_enhanced.risk_status')}",
+            f"📋 {t('paper_enhanced.orders')}",
+        ])
 
-    with paper_tab4:
-        st.markdown(f"**{t('paper_trading.positions')}**")
-        positions = st.session_state.get("paper_positions", {})
-        cash = st.session_state.get("paper_cash", 100000.0)
-        st.metric(t("paper_trading.available_cash"), f"${cash:,.2f}")
+        # ---- Overview ----
+        with pt_sub1:
+            st.subheader(t('paper_enhanced.realtime_equity_curve'))
 
-        if positions:
-            pos_df = pd.DataFrame([
-                {t("ui.ticker"): tk, t("ui.quantity"): p.get("qty", 0), t("ui.avg_cost"): f"${p.get('avg_cost', 0):.2f}"}
-                for tk, p in positions.items()
-            ])
-            st.dataframe(pos_df, use_container_width=True, hide_index=True)
-        else:
-            st.info(t("paper_trading.no_positions"))
+            # 实时权益曲线：优先从 bot 获取，否则从 trader 计算
+            eq_tracker = None
+            if bot:
+                eq_tracker = bot.get_equity_tracker()
+            else:
+                # 没有 bot 时，创建独立的 EquityTracker 展示账户状态
+                from trading.equity_tracker import EquityTracker, EquitySnapshot
+                eq_tracker = EquityTracker(storage_path="data/equity_paper.db")
+                # 记录当前账户快照
+                position_value = sum(p.get('qty',0)*p.get('avg_cost',0) for p in trader.positions.values())
+                total_equity = trader.cash + position_value
+                snapshot = EquitySnapshot(
+                    timestamp=datetime.now(),
+                    total_equity=total_equity,
+                    cash=trader.cash,
+                    position_value=position_value,
+                    unrealized_pnl=0,
+                    realized_pnl_today=0,
+                    positions=trader.positions,
+                )
+                eq_tracker.record_equity(snapshot)
+
+            df = eq_tracker.get_equity_curve(days=30)
+
+            if not df.empty:
+                fig = make_subplots(
+                    rows=2, cols=1,
+                    shared_xaxes=True,
+                    vertical_spacing=0.08,
+                    row_heights=[0.7, 0.3],
+                    subplot_titles=(t('paper_enhanced.equity_curve'), t('paper_enhanced.drawdown')),
+                )
+
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df['total_equity'],
+                    mode='lines', name=t('paper_enhanced.equity'),
+                    line=dict(color='#00C851', width=2),
+                    fill='tozeroy', fillcolor='rgba(0,200,81,0.1)',
+                ), row=1, col=1)
+
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df['cash'],
+                    mode='lines', name=t('paper_trading.current_cash'),
+                    line=dict(color='#FF8800', width=1),
+                ), row=1, col=1)
+
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df['position_value'],
+                    mode='lines', name=t('paper_trading.position_value'),
+                    line=dict(color='#33B5E5', width=1),
+                ), row=1, col=1)
+
+                # Drawdown
+                cummax = df['total_equity'].cummax()
+                drawdown = (df['total_equity'] - cummax) / cummax * 100
+
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=drawdown,
+                    mode='lines', name=t('paper_enhanced.drawdown') + ' %',
+                    line=dict(color='#FF4444', width=1.5),
+                    fill='tozeroy', fillcolor='rgba(255,68,68,0.1)',
+                ), row=2, col=1)
+
+                fig.update_layout(
+                    height=500, showlegend=True,
+                    hovermode='x unified',
+                    template='plotly_dark',
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Performance metrics
+                metrics = eq_tracker.calculate_metrics(days=30)
+                if metrics:
+                    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+                    mcol1.metric(t('paper_enhanced.total_return'), f"{metrics.total_return_pct:+.2f}%")
+                    mcol2.metric(t('paper_enhanced.sharpe_ratio'), f"{metrics.sharpe_ratio:.2f}")
+                    mcol3.metric(t('paper_enhanced.max_drawdown'), f"{metrics.max_drawdown_pct:.2f}%")
+                    mcol4.metric(t('paper_enhanced.win_rate'), f"{metrics.win_rate_pct:.1f}%")
+            else:
+                # 显示当前账户基本信息（即使没有历史数据）
+                position_value = sum(p.get('qty',0)*p.get('avg_cost',0) for p in trader.positions.values())
+                total_equity = trader.cash + position_value
+                mcol1, mcol2, mcol3 = st.columns(3)
+                mcol1.metric(t('paper_enhanced.equity'), f"${total_equity:,.0f}")
+                mcol2.metric(t('paper_trading.current_cash'), f"${trader.cash:,.0f}")
+                mcol3.metric(t('paper_trading.position_value'), f"${position_value:,.0f}")
+                st.info(t('paper_enhanced.no_equity_data'))
+
+        # ---- Trade History ----
+        with pt_sub2:
+            st.subheader(t('paper_enhanced.trade_history'))
+
+            # 交易历史：优先从 bot 获取，否则从 trader 获取
+            trades_df = pd.DataFrame()
+            if bot:
+                eq_tracker = bot.get_equity_tracker()
+                trades_df = eq_tracker.get_trade_history(days=30)
+            else:
+                # 从 trader 获取交易记录
+                trades_df = trader.get_trade_history(days=30)
+
+            if not trades_df.empty:
+                display_df = trades_df.copy()
+                if 'timestamp' in display_df.columns:
+                    display_df['timestamp'] = pd.to_datetime(display_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M')
+                if 'price' in display_df.columns:
+                    display_df['price'] = display_df['price'].apply(lambda x: f"${x:.2f}")
+                if 'realized_pnl' in display_df.columns:
+                    display_df['realized_pnl'] = display_df['realized_pnl'].apply(
+                        lambda x: f"${x:+.2f}" if pd.notna(x) else "-"
+                    )
+
+                    def highlight_pnl(val):
+                        if isinstance(val, str) and val.startswith('$+'):
+                            return 'background-color: rgba(0,200,81,0.2)'
+                        elif isinstance(val, str) and val.startswith('$-'):
+                            return 'background-color: rgba(255,68,68,0.2)'
+                        return ''
+
+                    styled = display_df.style.applymap(highlight_pnl, subset=['realized_pnl'])
+                    st.dataframe(styled, use_container_width=True, hide_index=True)
+                else:
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+            else:
+                st.info(t('paper_enhanced.no_trades_yet'))
+
+        # ---- Signal Analysis ----
+        with pt_sub3:
+            st.subheader(t('paper_enhanced.signal_analysis'))
+
+            # 信号分析：优先从 bot 获取，否则创建独立实例
+            explainer = None
+            if bot:
+                explainer = bot.get_signal_explainer()
+            else:
+                from trading.signal_explainer import SignalExplainer
+                explainer = SignalExplainer()
+
+            factor_stats = explainer.get_factor_statistics(days=30)
+
+            if factor_stats:
+                stats_df = pd.DataFrame([
+                    {
+                        t('paper_enhanced.factor'): k,
+                        t('paper_enhanced.appearances'): v['appearances'],
+                        t('paper_enhanced.avg_score'): f"{v['avg_score']:+.3f}",
+                        t('paper_enhanced.avg_confidence'): f"{v['avg_confidence']:.1%}",
+                    }
+                    for k, v in factor_stats.items()
+                ])
+                st.dataframe(stats_df, use_container_width=True, hide_index=True)
+            else:
+                st.info(t('paper_enhanced.no_signal_data'))
+
+            # Recent decisions
+            st.write("---")
+            st.subheader(t('paper_enhanced.recent_decisions'))
+            decisions = explainer.get_decisions(days=1)
+            if decisions:
+                for d in decisions[-10:]:
+                    with st.expander(f"{d.timestamp.strftime('%H:%M')} {d.action} {d.ticker} ({t('paper_enhanced.confidence')}: {d.confidence:.0%})"):
+                        st.write(f"**{t('paper_enhanced.market_regime')}:** {d.market_regime} ({t('paper_enhanced.score')}: {d.market_score:.2f})")
+                        st.write(f"**{t('paper_enhanced.factors')}:**")
+                        for f in d.factors:
+                            st.write(f"- {f.name}: {t('paper_enhanced.score')}={f.score:+.2f}, {t('paper_enhanced.weight')}={f.weight:.0%}, {t('paper_enhanced.confidence')}={f.confidence:.0%}")
+                        st.write(f"**{t('paper_enhanced.reasoning')}:** {' -> '.join(d.reasoning_chain[:5])}")
+            else:
+                st.info(t('paper_enhanced.no_decisions'))
+
+        # ---- Strategy Config ----
+        with pt_sub4:
+            st.subheader(t('paper_enhanced.strategy_config'))
+
+            instances = scm.get_active_instances()
+            if instances:
+                instance_options = {f"{i.strategy_name} ({i.ticker})": i.instance_id for i in instances}
+                selected = st.selectbox(t('paper_enhanced.select_strategy'), options=list(instance_options.keys()), key="scm_select")
+
+                if selected:
+                    inst = scm.get_instance(instance_options[selected])
+                    st.write(f"**{t('paper_enhanced.instance')}:** {inst.instance_id}")
+                    st.write(f"**{t('paper_enhanced.weight')}:** {inst.weight:.0%}")
+                    st.write(f"**{t('paper_enhanced.tags')}:** {', '.join(inst.tags)}")
+
+                    st.write(f"**{t('paper_enhanced.parameters')}:**")
+                    updated = False
+                    for param_name, param in inst.parameters.items():
+                        pcol1, pcol2 = st.columns([3, 1])
+                        with pcol1:
+                            if param.param_type == "int":
+                                new_val = st.number_input(
+                                    f"{param.name} ({param.description})",
+                                    min_value=int(param.min_value) if param.min_value else None,
+                                    max_value=int(param.max_value) if param.max_value else None,
+                                    value=int(param.value),
+                                    step=int(param.step) if param.step else 1,
+                                    key=f"scm_{inst.instance_id}_{param_name}",
+                                )
+                            elif param.param_type == "float":
+                                new_val = st.number_input(
+                                    f"{param.name} ({param.description})",
+                                    min_value=param.min_value,
+                                    max_value=param.max_value,
+                                    value=float(param.value),
+                                    step=param.step or 0.01,
+                                    key=f"scm_{inst.instance_id}_{param_name}",
+                                )
+                            else:
+                                new_val = param.value
+
+                            if new_val != param.value:
+                                scm.update_parameter(inst.instance_id, param_name, new_val)
+                                updated = True
+                        with pcol2:
+                            st.caption(f"{t('paper_enhanced.default_value')}: {param.default_value}")
+
+                    if updated:
+                        st.success(t('paper_enhanced.params_updated'))
+
+                    bcol1, bcol2, bcol3 = st.columns(3)
+                    with bcol1:
+                        if st.button(t('paper_enhanced.reset_default'), key=f"scm_reset_{inst.instance_id}"):
+                            scm.reset_parameters(inst.instance_id)
+                            st.rerun()
+                    with bcol2:
+                        if st.button(t('paper_enhanced.clone_strategy'), key=f"scm_clone_{inst.instance_id}"):
+                            new_inst = scm.clone_instance(inst.instance_id)
+                            if new_inst:
+                                st.success(f"{t('common.success')}: {new_inst.instance_id}")
+                                st.rerun()
+                    with bcol3:
+                        if st.button(t('paper_enhanced.delete'), key=f"scm_del_{inst.instance_id}"):
+                            scm.delete_instance(inst.instance_id)
+                            st.rerun()
+            else:
+                st.info(t('paper_enhanced.no_strategy_instances'))
+
+                # Manual creation
+                st.write("---")
+                st.subheader(t('paper_enhanced.create_strategy_instance'))
+                c_ticker = st.text_input(t('ui.ticker'), value="AAPL", key="create_ticker")
+                c_strategy = st.selectbox(t('paper_enhanced.strategy'), ["MA_Cross", "RSI", "MACD", "Bollinger", "Composite"], key="create_strategy")
+                if st.button(t('paper_enhanced.create_instance'), key="create_inst"):
+                    inst = scm.create_instance(c_strategy, c_ticker)
+                    st.success(f"{t('common.success')}: {inst.instance_id}")
+                    st.rerun()
+
+            # A/B Test
+            st.write("---")
+            st.subheader(t('paper_enhanced.ab_test'))
+            ab_results = scm.get_ab_test_results()
+            if ab_results:
+                ab_df = pd.DataFrame([
+                    {
+                        t('paper_enhanced.variant'): k,
+                        t('paper_enhanced.return_pct'): f"{v['total_return']:+.2f}%",
+                        t('paper_enhanced.sharpe_ratio'): f"{v['sharpe']:.2f}",
+                        t('paper_enhanced.win_rate_pct'): f"{v['win_rate']:.1f}%",
+                        t('paper_enhanced.max_dd'): f"{v['max_dd']:.2f}%",
+                    }
+                    for k, v in ab_results.items()
+                ])
+                st.dataframe(ab_df, use_container_width=True, hide_index=True)
+
+                if st.button(t('paper_enhanced.promote_best')):
+                    promoted = scm.promote_best_variant()
+                    if promoted:
+                        st.success(f"{t('common.success')}: {promoted}")
+                        st.rerun()
+            else:
+                st.info(t('paper_enhanced.no_ab_data'))
+
+        # ---- Risk Status ----
+        with pt_sub5:
+            st.subheader(t('risk.title'))
+
+            # Position risk
+            positions = trader.get_all_positions()
+            if positions:
+                st.write(f"**{t('paper_enhanced.position_risk')}**")
+                pos_df = pd.DataFrame([
+                    {
+                        t('ui.ticker'): t,
+                        t('paper_enhanced.qty'): p['qty'],
+                        t('paper_enhanced.avg_cost'): f"${p['avg_cost']:.2f}",
+                        t('paper_enhanced.weight'): f"{(p['qty']*p['avg_cost'])/(trader.cash + sum(pp['qty']*pp['avg_cost'] for pp in positions.values())):.1%}",
+                    }
+                    for t, p in positions.items()
+                ])
+                st.dataframe(pos_df, use_container_width=True, hide_index=True)
+            else:
+                st.info(t('paper_trading.no_positions'))
+
+            # Risk metrics
+            st.write("---")
+            st.write(f"**{t('paper_enhanced.risk_limits')}**")
+            rcol1, rcol2, rcol3 = st.columns(3)
+            rcol1.metric(t('paper_enhanced.max_position_pct'), f"{risk_mgr.max_position_pct:.0%}")
+            rcol2.metric(t('paper_enhanced.max_total_pct'), f"{risk_mgr.max_total_position_pct:.0%}")
+            rcol3.metric(t('paper_enhanced.risk_per_trade'), f"{risk_mgr.risk_per_trade_pct:.1%}")
+
+            rcol4, rcol5, rcol6 = st.columns(3)
+            rcol4.metric(t('paper_enhanced.stop_loss'), f"{risk_mgr.stop_loss_atr_mult:.1f}x ATR")
+            rcol5.metric(t('paper_enhanced.take_profit'), f"{risk_mgr.take_profit_atr_mult:.1f}x ATR")
+            rcol6.metric(t('paper_enhanced.daily_loss_limit'), f"{risk_mgr.daily_loss_stop_pct:.1%}")
+
+        # ---- Orders ----
+        with pt_sub6:
+            st.subheader(t('paper_enhanced.orders'))
+
+            # 订单管理：优先从 bot 获取，否则显示空状态
+            open_orders = []
+            om = None
+            if bot:
+                om = bot.get_order_manager()
+                open_orders = om.get_open_orders()
+
+            if open_orders:
+                st.write(f"**{t('paper_enhanced.open_orders')} ({len(open_orders)})**")
+                for o in open_orders:
+                    ocol1, ocol2 = st.columns([4, 1])
+                    with ocol1:
+                        st.write(f"{o.order_id}: {o.action} {o.qty} {o.ticker} @ {o.order_type.value}" +
+                                 (f" ${o.price:.2f}" if o.price else ""))
+                    with ocol2:
+                        if st.button(t('paper_enhanced.cancel'), key=f"cancel_{o.order_id}"):
+                            om.cancel_order(o.order_id)
+                            st.rerun()
+
+                if st.button(t('paper_enhanced.cancel_all')):
+                    om.cancel_all_orders()
+                    st.rerun()
+            else:
+                st.info(t('paper_enhanced.no_trades_yet'))
+
+            st.write("---")
+            st.subheader(t('paper_enhanced.manual_order'))
+            ocol1, ocol2, ocol3 = st.columns(3)
+            with ocol1:
+                o_ticker = st.text_input(t('ui.ticker'), value="AAPL", key="man_ticker")
+            with ocol2:
+                o_action = st.selectbox(t('paper_enhanced.action'), ["BUY", "SELL"], key="man_action")
+            with ocol3:
+                o_qty = st.number_input(t('paper_enhanced.qty'), min_value=1, value=100, key="man_qty")
+
+            o_type = st.selectbox(t('paper_enhanced.order_type'), ["MARKET", "LIMIT", "STOP"], key="man_type")
+            o_price = None
+            if o_type == "LIMIT":
+                o_price = st.number_input(t('paper_enhanced.limit_price'), min_value=0.01, value=150.0, key="man_price")
+
+            if st.button(t('paper_enhanced.submit_order'), key="man_submit"):
+                if bot and om:
+                    order = om.submit_order(
+                        ticker=o_ticker, action=o_action, qty=o_qty,
+                        order_type=o_type, price=o_price,
+                    )
+                    st.success(f"{t('common.success')}: {order.order_id}")
+                else:
+                    # Direct paper trade
+                    if o_action == "BUY":
+                        result = trader.buy(o_ticker, o_price or 150.0, o_qty)
+                    else:
+                        result = trader.sell(o_ticker, o_price or 150.0, o_qty)
+                    st.success(f"{t('common.success')}: {result}")
+
+    else:
+        st.error(t('paper_enhanced.enhanced_not_available'))
 
 
 # ============================================================
-# TAB 2: Live Trading Mode
+# TAB 3: Live Trading Mode
 # ============================================================
 with tab_live:
     st.markdown(f"### 🔴 {t('app.mode_live')}")
@@ -617,307 +1387,31 @@ with tab_live:
 
 
 # ============================================================
-# TAB 3: AI Analysis Mode
-# ============================================================
-with tab_ai:
-    st.markdown(f"### 🤖 {t('ai_analysis.title')}")
-
-    if "macro_scan_done" not in st.session_state:
-        st.session_state["macro_scan_done"] = False
-    if "macro_scan_result" not in st.session_state:
-        st.session_state["macro_scan_result"] = None
-
-    def _render_env_banner(macro_result):
-        if macro_result is None:
-            return
-        score = macro_result.environment.environment_score
-        risk = macro_result.environment.risk_appetite
-        if risk == "Risk-Off" or score <= 3:
-            st.error(f"⚠️ **{t('ui.environment_fail')}** — {t('ui.macro_high_risk')}")
-        elif score <= 5 or risk == "Neutral":
-            st.warning(f"⚠️ **{t('ui.environment_warn')}** — {t('ui.macro_caution')}")
-
-    if st.session_state["macro_scan_result"] is not None:
-        _render_env_banner(st.session_state["macro_scan_result"])
-
-    ai_tab0, ai_tab1, ai_tab2, ai_tab3 = st.tabs([
-        f"🌐 {t('ui.tab_macro')}",
-        f"📊 {t('ui.tab_market')}",
-        f"🔍 {t('ui.tab_screener')}",
-        f"📋 {t('ui.tab_report')}",
-    ])
-
-    with ai_tab0:
-        st.markdown(f"#### {t('ui.macro_scan')}")
-        st.caption(t("ui.macro_scan_desc"))
-
-        if st.button(f"🔍 {t('ui.scan_now')}", key="macro_scan_btn"):
-            with st.spinner(t("ui.scanning")):
-                try:
-                    from ai.macro_scanner import MacroScanner
-                    scanner = MacroScanner()
-                    scan_result = scanner.scan()
-                    st.session_state["macro_scan_result"] = scan_result
-                    st.session_state["macro_scan_done"] = True
-
-                    # 核心指标
-                    sc1, sc2, sc3, sc4 = st.columns(4)
-                    sc1.metric(t("ui.overall_score"), f"{scan_result.environment.macro_env_score}/10")
-                    sc2.metric(t("ui.macro_regime"), scan_result.environment.regime)
-                    sc3.metric(t("ui.macro_confidence"), t(f"confidence_{scan_result.environment.confidence}"))
-                    sc4.metric("VIX", f"{scan_result.vix:.2f} ({scan_result.environment.vix_signal})")
-
-                    # 概率分布
-                    st.markdown(f"#### {t('ui.macro_probability')}")
-                    prob_col1, prob_col2, prob_col3 = st.columns(3)
-                    prob_col1.metric(f"{t('ui.macro_p_risk_on')}", f"{scan_result.environment.P_risk_on*100:.1f}%")
-                    prob_col2.metric(f"{t('ui.macro_p_neutral')}", f"{scan_result.environment.P_neutral*100:.1f}%")
-                    prob_col3.metric(f"{t('ui.macro_p_risk_off')}", f"{scan_result.environment.P_risk_off*100:.1f}%")
-
-                    # 主导因子
-                    if scan_result.environment.key_drivers:
-                        st.markdown(f"#### 🔑 {t('ui.macro_key_drivers')}")
-                        st.markdown(", ".join(scan_result.environment.key_drivers))
-
-                    # 风险预警
-                    if scan_result.environment.warnings:
-                        st.markdown(f"#### ⚠️ {t('ui.macro_warnings')}")
-                        for w in scan_result.environment.warnings:
-                            st.warning(w)
-                    else:
-                        st.info(f"✅ {t('ui.no_warnings')}")
-
-                    # 模块分数
-                    with st.expander(f"📊 {t('ui.macro_module_scores') if t('ui.macro_module_scores') != 'ui.macro_module_scores' else '模块评分详情'}", expanded=False):
-                        mod_col1, mod_col2 = st.columns(2)
-                        with mod_col1:
-                            for mod, score in list(scan_result.environment.module_scores.items())[:4]:
-                                st.metric(f"{t(f'ui.macro_module_{mod}') if t(f'ui.macro_module_{mod}') != f'ui.macro_module_{mod}' else mod}", f"{score:.2f}")
-                        with mod_col2:
-                            for mod, score in list(scan_result.environment.module_scores.items())[4:]:
-                                st.metric(f"{t(f'ui.macro_module_{mod}') if t(f'ui.macro_module_{mod}') != f'ui.macro_module_{mod}' else mod}", f"{score:.2f}")
-
-                    st.markdown(f"### 📝 {t('ui.macro_summary')}")
-                    st.markdown(scan_result.environment.summary)
-
-                    if scan_result.index_results:
-                        st.markdown("#### 📊 指数趋势")
-                        idx_data = []
-                        for r in scan_result.index_results:
-                            idx_data.append({
-                                "指数": f"{r.ticker} ({r.name})",
-                                "趋势": r.trend,
-                                "周涨幅": f"{r.ret_5d:+.2f}%",
-                                "月涨幅": f"{r.ret_20d:+.2f}%",
-                                "量比": f"{r.volume_ratio:.2f}",
-                            })
-                        st.dataframe(pd.DataFrame(idx_data), use_container_width=True, hide_index=True)
-
-                    if scan_result.haven_results:
-                        st.markdown("#### 🛡️ 避险资产")
-                        haven_data = []
-                        for r in scan_result.haven_results:
-                            haven_data.append({
-                                "资产": f"{r.ticker} ({r.name})",
-                                "趋势": r.trend,
-                                "周涨幅": f"{r.ret_5d:+.2f}%",
-                                "月涨幅": f"{r.ret_20d:+.2f}%",
-                                "异动": "⚠️ 是" if r.is_abnormal else "否",
-                            })
-                        st.dataframe(pd.DataFrame(haven_data), use_container_width=True, hide_index=True)
-
-                    # 信用/流动性分析
-                    if scan_result.credit_result:
-                        st.markdown(f"#### 💳 {t('ui.macro_credit_analysis')}")
-                        credit = scan_result.credit_result
-                        credit_data = [{
-                            t('ui.macro_hyg_lqd'): f"{credit.hyg_lqd_ratio:.3f}",
-                            t('ui.macro_yield_curve'): f"{credit.spread_10y_2y:.2f}%",
-                            t('ui.macro_curve_status'): credit.curve_status,
-                            "评分": f"{credit.credit_score:.2f}",
-                        }]
-                        st.dataframe(pd.DataFrame(credit_data), use_container_width=True, hide_index=True)
-
-                    # 市场广度分析
-                    if scan_result.breadth_result:
-                        st.markdown(f"#### 📈 {t('ui.macro_breadth_analysis')}")
-                        breadth = scan_result.breadth_result
-                        breadth_data = [{
-                            t('ui.macro_rsp_vs_spy'): f"{breadth.rsp_vs_spy_diff:+.2f}%",
-                            "RSP 20d": f"{breadth.rsp_ret_20d:+.2f}%",
-                            "SPY 20d": f"{breadth.spy_ret_20d:+.2f}%",
-                            t('ui.macro_breadth_signal'): breadth.breadth_signal,
-                        }]
-                        st.dataframe(pd.DataFrame(breadth_data), use_container_width=True, hide_index=True)
-
-                except Exception as e:
-                    import traceback
-                    st.error(f"{t('ui.macro_no_data')}: {e}")
-                    st.code(traceback.format_exc())
-
-    with ai_tab1:
-        st.markdown(f"#### {t('ai_analysis.market_analyze')}")
-
-        if st.button(f"🔄 {t('ui.analyze_current_market')}", key="analyze_market"):
-            with st.spinner(t("ui.analyzing_market")):
-                try:
-                    from ai.market_analyzer import MarketAnalyzer
-                    analyzer = MarketAnalyzer()
-                    state = analyzer.analyze()
-
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric(t("ai_analysis.trend"), state.trend)
-                    m2.metric(t("ai_analysis.volatility"), state.volatility)
-                    m3.metric(t("ai_analysis.momentum"), state.momentum)
-                    m4.metric(t("ai_analysis.risk_level"), f"{state.risk_level}/10")
-
-                    rec_str = ', '.join(state.recommended_strategies) if state.recommended_strategies else ''
-                    st.markdown(f"**{t('ui.recommended_strategies')}:** {rec_str}")
-                    st.info(state.analysis_text)
-
-                    if state.analysis_steps:
-                        with st.expander(f"📝 {t('ui.analysis_steps')}", expanded=False):
-                            for step in state.analysis_steps:
-                                st.markdown(f"**{step.step_name}**")
-                                st.caption(f"输入: {step.input_data}")
-                                st.markdown(f"计算: `{step.calculation}`")
-                                st.markdown(f"结果: {step.result}")
-                                st.markdown(f"推理: {step.reasoning}")
-                                st.markdown("---")
-
-                    if state.raw_data:
-                        with st.expander(f"📊 {t('ui.raw_data')}", expanded=False):
-                            st.json(state.raw_data)
-
-                except Exception as e:
-                    import traceback
-                    st.error(f"{t('ui.macro_no_data')}: {e}")
-                    st.code(traceback.format_exc())
-
-    with ai_tab2:
-        st.markdown(f"#### {t('ai_analysis.screener_pool')}")
-
-        macro_result = st.session_state.get("macro_scan_result")
-        if macro_result is not None and macro_result.environment.environment_score < 4:
-            st.warning(f"⚠️ {t('ui.environment_warn')} — {t('ui.macro_caution')}")
-
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            pool = st.selectbox(
-                t("ui.stock_pool"), ["popular", "tech", "etf"],
-                format_func=lambda x: {"popular": t("ui.popular_stocks"), "tech": t("ui.tech_stocks"), "etf": "ETF"}[x],
-                key="ai_pool",
-            )
-        with col2:
-            top_n = st.number_input(t("ai_analysis.screener_top_n"), min_value=5, max_value=50, value=10, key="ai_topn")
-
-        if st.button(f"🔍 {t('ai_analysis.screener_run')}", key="screen_stocks"):
-            with st.spinner(t("ui.screening")):
-                try:
-                    from ai.stock_screener import StockScreener
-                    screener = StockScreener()
-                    candidates = screener.screen(pool_name=pool, top_n=top_n)
-
-                    if candidates:
-                        results = []
-                        for c in candidates:
-                            results.append({
-                                t("ui.ticker"): c.ticker,
-                                t("ui.score"): f"{c.score:.0f}",
-                                t("ui.signal"): c.signal,
-                                t("ui.price"): f"${c.price:.2f}",
-                                t("ui.reason"): c.reason,
-                            })
-                        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-                    else:
-                        st.warning(t("ui.no_condition"))
-                except Exception as e:
-                    import traceback
-                    st.error(f"{t('ui.macro_no_data')}: {e}")
-                    st.code(traceback.format_exc())
-
-    with ai_tab3:
-        st.markdown(f"#### {t('ui.daily_report')}")
-        watchlist = st.text_area(
-            t("ai_analysis.report_watchlist"),
-            value="AAPL,MSFT,GOOGL,AMZN,NVDA,META,TSLA", height=68, key="ai_watchlist",
-        )
-
-        if st.button(f"📋 {t('ai_analysis.report_generate')}", key="generate_report"):
-            with st.spinner(t("ui.analyzing_market")):
-                try:
-                    from ai.orchestrator import AIQuantAnalyst
-                    import yaml
-
-                    config_path = BASE_DIR / "config.yaml"
-                    with open(config_path, "r", encoding="utf-8") as f:
-                        config = yaml.safe_load(f)
-
-                    analyst = AIQuantAnalyst(config=config)
-                    tickers_list = [tk.strip().upper() for tk in watchlist.split(",") if tk.strip()]
-                    report = analyst.run_daily_analysis(watchlist=tickers_list, generate_report=False)
-
-                    st.markdown(f"**{t('ui.date')}: {report.date}**")
-                    ms = report.market_state
-                    r1, r2, r3, r4 = st.columns(4)
-                    r1.metric(t("ai_analysis.trend"), ms.get("trend", "unknown"))
-                    r2.metric(t("ai_analysis.volatility"), ms.get("volatility", "unknown"))
-                    r3.metric(t("ai_analysis.momentum"), ms.get("momentum", "unknown"))
-                    r4.metric(t("ai_analysis.risk_level"), f"{ms.get('risk_level', 5)}/10")
-
-                    recommended = ms.get("recommended_strategies", [])
-                    if recommended:
-                        rec_str = ', '.join(recommended)
-                        st.markdown(f"**{t('ui.recommended_strategies')}:** {rec_str}")
-
-                    analysis = ms.get("analysis", "")
-                    if analysis:
-                        st.info(analysis)
-
-                    if report.top_opportunities:
-                        st.markdown(f"### 🔥 {t('ui.top_opportunities')}")
-                        opp_data = []
-                        for opp in report.top_opportunities:
-                            opp_data.append({
-                                "标的": opp.get("ticker", ""),
-                                "得分": f"{opp.get('score', 0):.0f}",
-                                "信号": opp.get("signal", ""),
-                                "价格": f"${opp.get('price', 0):.2f}",
-                                "原因": opp.get("reason", ""),
-                            })
-                        st.dataframe(pd.DataFrame(opp_data), use_container_width=True, hide_index=True)
-
-                    if report.strategy_recommendations:
-                        st.markdown(f"### 📊 {t('ui.strategy_recommendations')}")
-                        rec_data = []
-                        for rec in report.strategy_recommendations:
-                            rec_data.append({
-                                "标的": rec.get("ticker", ""),
-                                "推荐策略": ", ".join(rec.get("strategies", [])),
-                                "原因": rec.get("reason", ""),
-                            })
-                        st.dataframe(pd.DataFrame(rec_data), use_container_width=True, hide_index=True)
-
-                    if report.risk_alerts:
-                        st.markdown(f"### ⚠️ {t('ui.risk_alerts')}")
-                        for alert in report.risk_alerts:
-                            st.warning(alert)
-
-                    if report.ai_summary:
-                        st.markdown(f"### 🤖 {t('ui.summary')}")
-                        st.markdown(report.ai_summary)
-
-                except Exception as e:
-                    import traceback
-                    st.error(f"{t('ui.macro_no_data')}: {e}")
-                    st.code(traceback.format_exc())
-
-
-# ============================================================
 # TAB 4: Optimize Mode
 # ============================================================
 with tab_optimize:
     st.markdown(f"### ⚙️ {t('optimization.title')}")
+    st.caption(t("ui.optimize_tab_desc") if t("ui.optimize_tab_desc") != "ui.optimize_tab_desc" else "Strategy parameter optimization using grid/random/Bayesian search")
+
+    # Operation mechanism description (NO ASCII box lines)
+    with st.expander(f"📖 {t('optimization.help_button')}", expanded=False):
+        st.markdown(f"""
+        **{t('ui.optimize_workflow_title') if t('ui.optimize_workflow_title') != 'ui.optimize_workflow_title' else 'Optimization Workflow'}:**
+        
+        1. **{t('ui.optimize_step1_title') if t('ui.optimize_step1_title') != 'ui.optimize_step1_title' else 'Select Strategy'}**: {t('ui.optimize_step1_desc') if t('ui.optimize_step1_desc') != 'ui.optimize_step1_desc' else 'Choose strategy type (MA/RSI/MACD/Bollinger/Composite)'}
+        2. **{t('ui.optimize_step2_title') if t('ui.optimize_step2_title') != 'ui.optimize_step2_title' else 'Select Target'}**: {t('ui.optimize_step2_desc') if t('ui.optimize_step2_desc') != 'ui.optimize_step2_desc' else 'Enter ticker symbol, system fetches 2 years of historical data'}
+        3. **{t('ui.optimize_step3_title') if t('ui.optimize_step3_title') != 'ui.optimize_step3_title' else 'Select Method'}**:
+           - **{t('ui.grid_search')}**: {t('ui.optimize_grid_desc') if t('ui.optimize_grid_desc') != 'ui.optimize_grid_desc' else 'Exhaustive search, most thorough but slower'}
+           - **{t('ui.random_search')}**: {t('ui.optimize_random_desc') if t('ui.optimize_random_desc') != 'ui.optimize_random_desc' else 'Random sampling, suitable for large parameter spaces'}
+           - **{t('ui.bayesian')}**: {t('ui.optimize_bayesian_desc') if t('ui.optimize_bayesian_desc') != 'ui.optimize_bayesian_desc' else 'Intelligent search using prior results, most efficient'}
+        4. **{t('ui.optimize_step4_title') if t('ui.optimize_step4_title') != 'ui.optimize_step4_title' else 'Set Trials'}**: {t('ui.optimize_step4_desc') if t('ui.optimize_step4_desc') != 'ui.optimize_step4_desc' else 'Ignored for grid search, used for random/Bayesian'}
+        5. **{t('ui.optimize_step5_title') if t('ui.optimize_step5_title') != 'ui.optimize_step5_title' else 'Run'}**: {t('ui.optimize_step5_desc') if t('ui.optimize_step5_desc') != 'ui.optimize_step5_desc' else 'System automatically runs backtests to find optimal parameters'}
+        
+        **{t('ui.optimize_output_title') if t('ui.optimize_output_title') != 'ui.optimize_output_title' else 'Output'}:**
+        - **{t('ui.best_params')}**: {t('ui.optimize_output_params_desc') if t('ui.optimize_output_params_desc') != 'ui.optimize_output_params_desc' else 'Parameter combination maximizing Sharpe ratio'}
+        - **{t('backtest.metrics_sharpe')}**: {t('ui.optimize_output_sharpe_desc') if t('ui.optimize_output_sharpe_desc') != 'ui.optimize_output_sharpe_desc' else 'Sharpe ratio for optimal parameters'}
+        - **{t('optimization.results_table')}**: {t('ui.optimize_output_table_desc') if t('ui.optimize_output_table_desc') != 'ui.optimize_output_table_desc' else 'All trial parameters and scores'}
+        """)
 
     o1, o2, o3 = st.columns(3)
     with o1:
@@ -986,6 +1480,7 @@ with tab_optimize:
 # ============================================================
 with tab_settings:
     st.markdown(f"### 🔧 {t('app.mode_settings')}")
+    st.caption(t("ui.settings_tab_desc") if t("ui.settings_tab_desc") != "ui.settings_tab_desc" else "Language, risk, notification and API configuration")
 
     # ---- Deploy to Cloud ----
     st.markdown(f"#### ☁️ {t('settings.deploy_title')}")

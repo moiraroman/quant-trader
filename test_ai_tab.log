@@ -1,0 +1,72 @@
+=== Simulating AI Tab Rendering ===
+
+1. Macro scan button click simulation:
+  environment_score: 7
+  risk_appetite: Risk-On
+  macro_env_score: 7
+  regime: Risk-On
+  confidence: high
+  vix: 18.6200008392334
+  vix_signal: elevated
+  P_risk_on: 0.8
+  P_neutral: 0.15
+  P_risk_off: 0.05
+  key_drivers: ['权益指数', '波动率', '信用/流动性', '美元']
+  warnings: ['⚠️ 广度背离：指数上涨但广度恶化，可能仅由少数权重股拉动']
+  module_bias count: 8
+  module_scores count: 7
+  forecast_5d: 多
+  forecast_30d: 空
+  forecast_confidence_5d: 0.67
+  forecast_confidence_30d: 0.6
+  summary: 📊 宏观全景扫描报告 v2
+
+**市场状态**: Risk-On
+**环境评分**: 7/10
+**...
+  index_results: 5 items
+  haven_results: 5 items
+  credit_result: True
+  breadth_result: True
+  module_bias[0] type: <class 'ai.macro_scanner.ModuleBias'>
+  module_bias[0].name: 权益指数
+  module_bias[0].bias: 多
+  module_bias[0].strength: 0.8
+  module_bias[0].detail: 5牛0熊，多头占优...
+
+2. MarketAnalyzer simulation:
+  trend: bull
+  volatility: low
+  momentum: strong
+  risk_level: 2
+  recommended_strategies: ['MACD', 'RSI']
+  analysis_text: 当前市场状态：上升趋势
+波动率：低波动
+动量：强势
+风险等级：2/10
+
+推荐策略：MACD, RS...
+  analysis_steps: 8
+  raw_data: True
+
+3. StockScreener simulation:
+  candidates: 5
+  First candidate: NVDA, score=82.40444188679427, signal=BUY
+
+4. Orchestrator simulation:
+  date: 2026-04-25
+  market_state keys: ['trend', 'volatility', 'momentum', 'risk_level', 'confidence', 'recommended_strategies', 'analysis', 'analysis_steps', 'raw_data', 'timestamp']
+  top_opportunities: 1
+  strategy_recommendations: 1
+  risk_alerts: 0
+  ai_summary: None
+
+5. Checking for specific issues:
+  analysis_step type: <class 'ai.market_analyzer.AnalysisStep'>
+  step_name: 计算移动平均线
+  input_data: 收盘价序列 (n=100)
+  calculation: MA50=676.06, MA200=676.06, 当前价格=713.24
+  result: 价格 > MA50 < MA200
+  reasoning: 通过价格与均线的位置关系判断趋势方向
+
+=== ALL AI TAB CHECKS PASSED ===
